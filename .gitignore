@@ -17,6 +17,7 @@ referance notes/
 
 # Vendored third-party skill collections (not project source)
 .clinerules/skills/
+.opencode/skills/
 
 # Editor state
 .vscode/

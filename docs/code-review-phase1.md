@@ -79,3 +79,15 @@ Indian equity investing, currently at Phase 1: app shell, database layer, holdin
 | 3. requirements.txt + truthful roadmap | `444066a` (customtkinter 6.0.0 pinned); phases.md updated to match reality |
 | 4. Exclude vendored skills bundle | `.clinerules/skills/` ignored in git (kept on disk so Cline keeps working; same for your own `.clinerules` rule files, which **are** tracked) |
 | 5. Trader decisions (findings 4–8) | Implemented as Phase 2.5 in this commit — paise INTEGER money, side-aware net_amount, `delete_transaction` + `rebuild_holdings`, DB constraints with v1→v2 migration, ISO-date contract for the importer. Decisions: [`data-foundation.md`](data-foundation.md) · Tests 17/17 green |
+
+### Incident note (same day): commit `95b97d3` accidentally tracked the vendored skill bundle
+
+`smart_commit.sh` stages with an unconditional `git add .`. When the agent
+configuration dir was renamed `.clinerules/` → `.opencode/` (carrying the 4,465-file
+vendored `A4-Claude-skills-main` collection to a path not yet covered by
+`.gitignore`), commit `95b97d3` swept the whole bundle in. Fixed immediately
+after in a following chore commit: `.opencode/skills/` added to `.gitignore` and
+untracked with `git rm -r --cached` (kept on disk so agent skills keep working).
+The blobs remain in history until a `git filter-repo` purge before any first push.
+Rule files (`cline-skills.md`, `project-workflow.md`, `settings.json`) stay tracked
+at their new `.opencode/` location.
