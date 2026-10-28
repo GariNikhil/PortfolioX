@@ -4,8 +4,9 @@
 # GUI framework
 customtkinter==6.0.0
 
-# Planned for the import / reports phases (uncomment when adopted):
-# openpyxl
-# pandas
-# pdfplumber
-# matplotlib
+# Groww tradebook import: XLSX reading (CSV parsing uses the stdlib csv module)
+openpyxl==3.1.5
+
+# Planned for later phases (uncomment when adopted):
+# pdfplumber   (contract-note PDF parsing)
+# matplotlib   (charts)

@@ -1,0 +1,8 @@
+Date,Symbol,Quantity,Price,Buy/Sell,Trade Type,Status,Product
+05-03-2026,DEMO_A,10,1275.35,Buy,Delivery,Open,Equity
+05-03-2026,DEMO_B,4,"₹2,780.50",Buy,Delivery,Open,Equity
+09-03-2026,DEMO_A,3,1310.00,Sell,Intraday,Square off,Equity
+09-03-2026,DEMO_A,3,1298.25,Buy,Intraday,Square off,Equity
+31-02-2026,DEMO_C,5,100,Buy,Delivery,Open,Equity
+09-03-2026,DEMO_C,0,500,Buy,Intraday,Open,Equity
+09-03-2026,DEMO_C,2,500,Dividend,Delivery,Open,Equity
