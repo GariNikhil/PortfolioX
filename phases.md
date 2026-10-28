@@ -7,12 +7,16 @@ PortfolioX is a local-first desktop portfolio management application designed fo
 - [x] Create project README
 - [x] Set up package structure (database/, calculations/, importers/, ui/)
 - [x] Configure Python dependencies (requirements.txt / pyproject.toml)
-## Phase 2: Database Layer ✅ **In Progress**
+## Phase 2: Database Layer ✅
 
 **Goal**: Establish the local SQLite database with schema, connection management, and CRUD operations.
 
 - [x] Define database schema (transactions, holdings, dividends, imports tables)
 - [x] Implement connection management (create_connection, DB_PATH handling)
+- [x] Ensure schema at startup with v1 -> paise migration (ensure_schema)
+- [x] Exact money storage as INTEGER paise with NOT NULL / CHECK constraints
+- [x] Side-aware net_amount (BUY debits, SELL credits)
+- [x] add_transactions batch insert, delete_transaction, rebuild_holdings
 ## Phase 3: Groww Import System 🟡 **Current Focus**
 
 **Goal**: Build the import system to parse Groww tradebook CSV/XLSX files and populate the database.
@@ -78,7 +82,7 @@ PortfolioX is a local-first desktop portfolio management application designed fo
 | Phase | Status | Description |
 |-------|--------|-------------|
 | 1 | ✅ | Project Scaffold |
-| 2 | 🟡 | Database Layer (current focus) |
+| 2 | ✅ | Database Layer |
 | 3 | 🟡 | Groww Import System (next focus) |
 | 4 | ✅ | Holdings Calculator |
 ## Current Sprint: Phase 2 to Phase 3 Transition

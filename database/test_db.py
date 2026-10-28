@@ -14,7 +14,9 @@ class DatabaseConnectionTests(unittest.TestCase):
                 connection = db.create_connection()
                 try:
                     self.assertTrue(database_path.is_file())
-                    self.assertEqual(connection.execute("SELECT 1").fetchone(), (1,))
+                    self.assertEqual(
+                        tuple(connection.execute("SELECT 1").fetchone()), (1,)
+                    )
                 finally:
                     connection.close()
 

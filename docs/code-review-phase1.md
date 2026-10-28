@@ -69,3 +69,13 @@ Indian equity investing, currently at Phase 1: app shell, database layer, holdin
 & ".\.venv\Scripts\python.exe" -m compileall -q app.py ui database calculations
 & ".\.venv\Scripts\python.exe" -m unittest discover -v
 ```
+
+## Outcome (Oct 28 2026)
+
+| Action plan item | Result |
+|---|---|
+| 1. git init + .gitignore + first commit | `087f717` — 47 files tracked; `referance/` (real contract notes & statements), `data/`, `backups/`, `.clinerules/skills/`, `.venv/` excluded. Repo-local identity set; replace with a real email before any future `git push`. |
+| 2. Schema on startup | `444066a` — app.py creates/ensures the schema; kills the fresh-install crash |
+| 3. requirements.txt + truthful roadmap | `444066a` (customtkinter 6.0.0 pinned); phases.md updated to match reality |
+| 4. Exclude vendored skills bundle | `.clinerules/skills/` ignored in git (kept on disk so Cline keeps working; same for your own `.clinerules` rule files, which **are** tracked) |
+| 5. Trader decisions (findings 4–8) | Implemented as Phase 2.5 in this commit — paise INTEGER money, side-aware net_amount, `delete_transaction` + `rebuild_holdings`, DB constraints with v1→v2 migration, ISO-date contract for the importer. Decisions: [`data-foundation.md`](data-foundation.md) · Tests 17/17 green |
