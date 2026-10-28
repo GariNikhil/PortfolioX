@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
+from calculations.fno import normalize_fno_symbol
 from database import manager
 
 DATE_FORMATS = ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d %b %Y", "%d %B %Y")
@@ -101,18 +102,35 @@ def clean_symbol(value):
     return re.sub(r"\s+", " ", str(value or "").strip())
 
 
+def canonical_trade_symbol(symbol):
+    """Canonical identity of a symbol for duplicate detection.
+
+    F&O text is first brought to one canonical shape (calculations.fno),
+    then the symbol_aliases table maps verbatim equity variants — the same
+    normalization rebuild_holdings() applies. So the same trade imported
+    under different names ('VEDANTA' vs 'VEDANTA LIMITED', or two F&O
+    expiry spellings) produces one key and a re-import skips it.
+    """
+
+    text = str(symbol or "").strip()
+    normalized = normalize_fno_symbol(text)
+    if normalized is not None:
+        return normalized
+    return manager.canonical_symbol(text.upper())
+
+
 def trade_key(row):
     """Identity of a trade for re-import detection.
 
-    Built from (date, symbol, side, quantity, gross price in paise). Note:
-    two genuinely identical same-day trades at the same price share a key,
-    so a re-import treats the second one as a duplicate. This is the
-    documented trade-off of content-key idempotency.
+    Built from (date, canonical symbol, side, quantity, gross price in
+    paise). Note: two genuinely identical same-day trades at the same
+    price share a key, so a re-import treats the second one as a
+    duplicate. This is the documented trade-off of content-key idempotency.
     """
 
     return (
         row["trade_date"],
-        str(row["symbol"]).upper(),
+        canonical_trade_symbol(row["symbol"]),
         row["transaction_type"],
         round(float(row["quantity"]), 4),
         round(float(row["price"] or 0) * 100),
@@ -144,6 +162,18 @@ def _split_oversells(pending):
     and 1e-9 tolerance, rows that would oversell are rejected up-front so
     the rest of the file still imports; the position state after this
     simulation is exactly what rebuild_holdings() will see.
+
+    Two refinements keep legitimate real-world notes importing:
+
+    - Symbols are canonicalized (F&O shape, then aliases) before matching —
+      the same normalization rebuild_holdings() applies — so a note selling
+      'PUNJAB NATIONAL BANK' is covered by a holding stored as 'PNB'.
+    - Within a (symbol, date) group whose sells are covered by the day's
+      buys plus the position held before the import (a same-day roundtrip,
+      possibly listed sell-first in the note), buys are ordered before
+      sells so the rebuild never sees a sell ahead of its same-day buy.
+      Groups that remain infeasible keep their file order and the
+      simulation rejects the rows that genuinely oversell.
     """
 
     positions = {
@@ -151,23 +181,60 @@ def _split_oversells(pending):
         for holding in manager.get_holdings()
     }
 
-    insertable, oversells = [], []
-    for order, row in enumerate(sorted(pending, key=lambda r: r["trade_date"])):
-        symbol = str(row["symbol"]).upper()
+    # Canonical symbol per row for position matching; rows keep their
+    # verbatim symbol in the database.
+    canonical = {id(row): canonical_trade_symbol(row["symbol"]) for row in pending}
+
+    # Per (canonical symbol, date) groups, in first-appearance order.
+    groups = {}
+    for order, row in enumerate(pending):
+        key = (canonical[id(row)], row["trade_date"])
+        group = groups.setdefault(key, {"bought": 0.0, "sold": 0.0, "rows": []})
+        quantity = float(row["quantity"])
+        if row["transaction_type"] == "BUY":
+            group["bought"] += quantity
+        else:
+            group["sold"] += quantity
+        group["rows"].append((order, row))
+
+    # Insert order: file order, except feasible groups go buys-first.
+    ordered = []
+    for key, group in groups.items():
+        members = group["rows"]
+        covered = (
+            group["sold"] <= positions.get(key[0], 0.0) + group["bought"] + 1e-9
+        )
+        if covered and group["sold"]:
+            members = (
+                [item for item in members if item[1]["transaction_type"] == "BUY"]
+                + [item for item in members if item[1]["transaction_type"] != "BUY"]
+            )
+        ordered.extend(members)
+
+    # Simulate exactly what rebuild_holdings() will see: (trade date, id),
+    # where id follows the insert order above.
+    oversell_rows = set()
+    oversell_reports = []
+    for _index, (_order, row) in sorted(
+        enumerate(ordered),
+        key=lambda item: (item[1][1]["trade_date"], item[0]),
+    ):
+        symbol = canonical[id(row)]
         held = positions.get(symbol, 0.0)
         quantity = float(row["quantity"])
 
         if row["transaction_type"] == "SELL" and quantity > held + 1e-9:
-            oversells.append((order, row, held))
+            oversell_rows.add(id(row))
+            oversell_reports.append((row, held))
             continue
 
         if row["transaction_type"] == "BUY":
             positions[symbol] = held + quantity
         else:
             positions[symbol] = max(held - quantity, 0.0)
-        insertable.append(row)
 
-    return insertable, oversells
+    insertable = [row for _order, row in ordered if id(row) not in oversell_rows]
+    return insertable, oversell_reports
 
 
 def commit_import(filename, source_kind, rows, failures, skip_duplicates=True,
@@ -193,7 +260,7 @@ def commit_import(filename, source_kind, rows, failures, skip_duplicates=True,
         result.duplicates = len(rows) - len(pending)
 
     pending, oversells = _split_oversells(pending)
-    for _order, row, held in oversells:
+    for row, held in oversells:
         result.failures.append(RowFailure(
             row_number=0,
             reason=(

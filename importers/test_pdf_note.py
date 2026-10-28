@@ -193,6 +193,54 @@ class CoreParseTests(unittest.TestCase):
         with self.assertRaisesRegex(ImportFileError, "Trade date"):
             parse_contract_note_lines("no dates here at all")
 
+    def test_trade_date_header_is_case_insensitive(self):
+        # Real notes print both 'Trade date' and 'Trade Date' (notes
+        # 1234567890-6..9 use the capital-D form and used to be rejected).
+        text = (
+            "Trade Date 18-07-2023\n"
+            "12345678901234 10:00:00 111 10:00:01 SYMBOL NSE B 10 2500.00 25000.00\n"
+        )
+        rows, failures = parse_contract_note_lines(text)
+
+        self.assertEqual(failures, [])
+        self.assertEqual(rows[0]["trade_date"], "2023-07-18")
+
+    def test_wrapped_fno_description_is_joined_back(self):
+        # pypdf wraps long descriptions across three physical lines
+        # (real note 1234567890-6); the parts must form one trade row.
+        text = (
+            "Trade date 18-07-2023\n"
+            "1600000000000000 12:29:07 521238859 12:29:07 "
+            "BANKNIFTY 45700 CE 20 Jul\n"
+            "2023\n"
+            "NSE B 25 138.20 138.20 -3455.00\n"
+        )
+        rows, failures = parse_contract_note_lines(text)
+
+        self.assertEqual(failures, [])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["symbol"], "BANKNIFTY 45700 CE 20 JUL 2023")
+        self.assertEqual(rows[0]["transaction_type"], "BUY")
+        self.assertEqual(rows[0]["quantity"], 25.0)
+        self.assertEqual(rows[0]["price"], 138.20)
+        # |net| == qty*price exactly -> zero charges.
+        self.assertEqual(rows[0]["brokerage"], 0.0)
+
+    def test_wrapped_line_without_year_continuation_stays_a_failure(self):
+        # A genuinely broken line must still be reported, not silently
+        # merged with whatever follows it.
+        text = (
+            "Trade date 18-07-2023\n"
+            "12345678901234 10:00:00 111 10:00:01 SYMBOL NSE\n"
+            "2023\n"
+            "garbage line here\n"
+        )
+        rows, failures = parse_contract_note_lines(text)
+
+        self.assertEqual(rows, [])
+        self.assertEqual(len(failures), 1)
+        self.assertIn("Buy(B)/Sell(S)", failures[0].reason)
+
     def test_negative_price_becomes_failure(self):
         text = (
             "Trade date 27-07-2023\n"

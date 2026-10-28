@@ -20,8 +20,12 @@ All importers (Groww included) share the same contract, per
   SELL = qty×price − charges), ISO-8601 dates.
 - `ImportFileError` for file-level problems (after a FAILED audit entry),
   `RowFailure`/`ImportResult` for the row-level report.
-- `commit_import()` dedupes by content key (date, symbol, side, quantity,
-  price in paise), then inserts atomically via `database.manager` and
+- `commit_import()` dedupes by content key (date, **canonical** symbol, side,
+  quantity, price in paise) — the symbol is canonicalized through the same
+  F&O + alias normalization `rebuild_holdings()` applies, so the same trade
+  imported under different verbatim names (`VEDANTA` vs `VEDANTA LIMITED`,
+  or two F&O expiry spellings) is skipped on re-import instead of doubling
+  the holding. Then it inserts atomically via `database.manager` and
   rebuilds holdings.
 
 **Oversell handling.** Real contract notes sell shares bought in an earlier
@@ -33,6 +37,21 @@ positions (same ordering and tolerance as
 rows into row-level failures (`row_number=0`, reason names the symbol), so
 the rest of the file still imports. Import the earlier buys (or opening
 holdings) first if you want those rows accepted.
+
+Two refinements keep legitimate real-world notes importing:
+
+- **Canonical position matching.** The simulation matches incoming rows
+  against holdings by canonical symbol (F&O shape, then aliases), the same
+  normalization the rebuild applies — a note selling `PUNJAB NATIONAL BANK`
+  is covered by a holding stored as `PNB`.
+- **Same-day roundtrips import regardless of printed order.** Notes list
+  intraday roundtrips in trade-time order, which sometimes puts sells
+  before their same-day buys (real note 1234567890-9: Zomato sells 10/51
+  printed before the buys they close). Within a (symbol, date) group whose
+  sells are covered by the day's buys plus the position held before the
+  import, rows are inserted buys-first so the (trade date, id) rebuild
+  ordering never sees an oversell. Groups that remain infeasible keep
+  their file order and the genuinely overselling rows are rejected.
 
 ## `importers/contract_note.py` — Orders sheet
 
@@ -124,6 +143,17 @@ derived columns, repeated header blocks).
   Identical (symbol, date, qty, price) rows inside one file are imported
   once; partial rows (missing price/qty/date) become row failures.
 - `Brokerage` here is a rupee amount and is stored as-is.
+- **The snapshot rows duplicate the official contract notes.** Attribution
+  (Oct 2026): all 4 snapshot rows re-appear in notes 1–5/10 under the full
+  names (`VEDANTA LIMITED`, `COAL INDIA LTD`, `PUNJAB NATIONAL BANK` 40,
+  `RELIANCE POWER LTD.`) — the notes are the authoritative record. Two
+  snapshot entries even contradict them (PNB 20 vs the note's 40; Coal
+  India 233.05 vs the note's 233.5). The snapshot rows were removed from
+  the live database in favour of the notes; the aliases
+  (`PUNJ. NATIONLBAK`, `RELIANCE POWER L`, …) keep a future re-import of
+  this file deduping to a no-op — except the contradictory PNB row, which
+  content dedup cannot reconcile (different quantity) and which must not
+  be re-imported.
 
 Result on the real file (scratch DB): **4 imported, 3 template-debris
 failures**.
@@ -137,10 +167,18 @@ time, trade no, trade time, Security/Contract description, exchange, B/S,
 quantity, rate, optional middle columns, Net Total — extracted as text.
 
 - **Self-dating**: each note carries its own `Trade date DD-MM-YYYY` header
-  line, so unlike the Orders xlsx no caller-supplied date is needed.
+  line, so unlike the Orders xlsx no caller-supplied date is needed. The
+  header match is case-insensitive — real notes print both `Trade date`
+  (notes 1–5, 10) and `Trade Date` (notes 6–9).
 - **Trade-line matching**: rows must start with a 10–16 digit order number,
   two times, a trade number and a second time; page headers, per-instrument
   `Total` rows and `Net Total` lines never match and are skipped.
+- **Wrapped F&O descriptions are joined back**: pypdf wraps long contract
+  descriptions across three physical lines (`… BANKNIFTY 45700 CE 20 Jul` /
+  `2023` / `NSE B 25 138.20 138.20 -3455.00`). When a trade line carries no
+  B/S flag and the next two lines are a bare year plus an
+  exchange+side+numbers tail, the three lines are merged into one logical
+  row (notes 6 and 8; six trades this used to drop).
 - **Brokerage from money, not columns**: the optional middle columns
   (brokerage / net rate / closing rate) are ambiguous in extracted text, so
   charges = |Net Total| − quantity×rate. This keeps the stored row exactly
@@ -152,6 +190,33 @@ quantity, rate, optional middle columns, Net Total — extracted as text.
 
 Result on the real unencrypted sample (scratch DB): all trade rows of
 `28.pdf` parse and import through the standard `commit_import()` path.
+
+Result on the real encrypted notes (scratch DB, passwords from the vault):
+notes 1–5, 10 and 28, 29, 31 import cleanly; notes 6–9 (after the
+case-insensitivity and unwrap fixes) import 50 trades with the only
+remaining failure being the 18-07 PUNJAB NATIONAL BANK sell-20, which the
+empty scratch DB cannot cover — against the live holdings (PNB bought 40 on
+07-13 per its own note) it is a legitimate sale.
+
+### The 06-2022 `trade_details_*.pdf` files are skipped
+
+`trade_details_CAHXXXXX2L_2413523121.pdf` and
+`trade_details_Buyback_CAHXXXXX2L_2415720172.pdf` are a different IIFL
+format — a "Capital Market" per-trade table (Sr.No, TM name, client code,
+B/S, security, symbol, series, trade no, time, qty, price, traded value),
+not the Orders layout. Observations:
+
+- The `Trade No` embeds the date (`2022062700000000` → 2022-06-27), so the
+  files are datable, but each row is a single fill while the IIFL Trade
+  Listing already covers the same 2022-06-27 NTPC/PENIND roundtrips
+  **aggregated** (listing: B4+S2+S2; trade details: B2+B2+S2+S2). Importing
+  both levels would double-count the same fills.
+- The Buyback file is a single-row subset of the other file.
+
+**Decision:** skip both files. The trades they contain are already in the
+database through the Trade Listing import; a per-fill importer would add
+row granularity the aggregation-based dedup cannot reconcile. Revisit only
+if fill-level history is ever needed.
 
 ### Encrypted notes and the password vault
 
@@ -184,17 +249,17 @@ schema v2) merges them **at holdings-aggregation time only**:
 
 ## Known limitations / follow-ups
 
-- **Real encrypted PDFs still locked.** The vault flow is built and tested,
-  but the actual passwords for `CONTRACT NOTE 1234567890*.pdf` and the
-  06-2022 pair must be entered once by the user (or discovered from broker
-  conventions such as PAN case variants); until then those files cannot be
-  imported.
+- **~~Real encrypted PDFs still locked.~~ Resolved (Oct 2026):** the
+  passwords are stored in the vault and all `CONTRACT NOTE 1234567890*.pdf`
+  notes import. The 06-2022 `trade_details_*.pdf` pair is deliberately
+  skipped (see above).
 - **Multi-day Orders workbooks cannot be dated from their contents** (29
   non-chronological, mixed-source blocks; one hard anchor: block 18 =
   2023-07-27 via trade-number match with 28.pdf). The path forward is to
-  unlock the encrypted PDFs, import them (they self-date), then date
-  Orders blocks by matching (order no, trade no) against the imported
-  PDF trades.
+  date Orders blocks by matching (order no, trade no) against the now-
+  imported PDF trades, and import only the blocks whose trades the notes
+  do not already cover (e.g. the VEDANTA sell-13 and the COAL INDIA
+  2 @ 235.25 buy exist only in the workbook).
 - The UI import page (Phase 6) will surface `ImportResult.summary()` and
   the failure list; the audit trail already distinguishes import kinds:
   `GROWW_TRADEBOOK`, `CONTRACT_NOTE_ORDERS`, `IIFL_TRADE_LISTING`,

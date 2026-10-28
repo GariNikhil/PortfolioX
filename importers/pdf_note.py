@@ -59,7 +59,7 @@ _TRADE_LINE = re.compile(
     r"(?P<rest>.+?)\s*$"
 )
 
-_TRADE_DATE = re.compile(r"Trade date\s+(\d{1,2}-\d{1,2}-\d{4})")
+_TRADE_DATE = re.compile(r"Trade date\s+(\d{1,2}-\d{1,2}-\d{4})", re.IGNORECASE)
 
 _NUMBER = re.compile(r"^-?[\d,]+(?:\.\d+)?$")
 
@@ -163,13 +163,21 @@ def parse_contract_note_lines(text, filename="contract note"):
         )
     trade_date = _iso_from_dmy(date_match.group(1))
 
+    lines = text.splitlines()
     valid, failures = [], []
-    line_number = 0
-    for line in text.splitlines():
-        line_number += 1
+    merged_through = set()  # line numbers consumed as wrap continuations
+    for line_number, line in enumerate(lines, start=1):
+        if line_number in merged_through:
+            continue
         match = _TRADE_LINE.match(line.strip())
         if match is None:
             continue  # page headers, Totals, Net Totals, page furniture
+
+        if not _has_side_token(match.group("rest")):
+            merged = _unwrap_wrapped_description(lines, line_number - 1)
+            if merged is not None:
+                match = _TRADE_LINE.match(merged)
+                merged_through.update((line_number + 1, line_number + 2))
 
         try:
             valid.append(_parse_line(match.groupdict(), trade_date))
@@ -177,6 +185,30 @@ def parse_contract_note_lines(text, filename="contract note"):
             failures.append(RowFailure(row_number=line_number, reason=str(error)))
 
     return valid, failures
+
+
+_WRAP_YEAR = re.compile(r"^\d{4}$")
+_WRAP_TAIL = re.compile(r"^[A-Za-z]+\s+[BS]\s+-?[\d,]+(?:\.\d+)?(?:\s|$)")
+
+
+def _unwrap_wrapped_description(lines, index):
+    """Join a wrapped F&O trade line back into one logical line, or None.
+
+    pypdf wraps long Security/Contract descriptions across physical lines:
+    '1600000000000000 12:29:07 521238859 12:29:07 BANKNIFTY 45700 CE 20 Jul'
+    / '2023' / 'NSE B 25 138.20 138.20 -3455.00'. The continuation is
+    recognized by a bare year on the next line and an exchange+side+numbers
+    tail on the line after that.
+    """
+
+    if index + 2 >= len(lines):
+        return None
+    year = lines[index + 1].strip()
+    tail = lines[index + 2].strip()
+    if not _WRAP_YEAR.fullmatch(year) or not _WRAP_TAIL.match(tail):
+        return None
+    merged = f"{lines[index].strip()} {year} {tail}"
+    return merged if _TRADE_LINE.match(merged) else None
 
 
 def _iso_from_dmy(text):
@@ -231,12 +263,7 @@ def _split_tail(rest):
     """
 
     tokens = rest.split()
-    side_index = None
-    for index, token in enumerate(tokens):
-        if token in ("B", "S") and index + 1 < len(tokens) \
-                and _NUMBER.match(tokens[index + 1]):
-            side_index = index
-            break
+    side_index = _side_index(tokens)
     if side_index is None or side_index < 1:
         raise ValueError(f"no Buy(B)/Sell(S) flag found in '{rest}'")
 
@@ -252,6 +279,22 @@ def _split_tail(rest):
         raise ValueError(f"trade line '{rest}' has too few numeric columns")
 
     return side, exchange.upper(), description, numbers
+
+
+def _side_index(tokens):
+    """Index of the B/S flag token followed by a number, or None."""
+
+    for index, token in enumerate(tokens):
+        if token in ("B", "S") and index + 1 < len(tokens) \
+                and _NUMBER.match(tokens[index + 1]):
+            return index
+    return None
+
+
+def _has_side_token(rest):
+    """Whether a line tail already carries its exchange/side/numbers part."""
+
+    return _side_index(rest.split()) is not None
 
 
 def _strip_commas(token):
