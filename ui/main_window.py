@@ -104,3 +104,11 @@ class PortfolioX(ctk.CTk):
         if self.current_page is not None:
             self.current_page.destroy()
         self.current_page = page_class(self.content)
+
+        # Highlight the active navigation button.
+        for name, btn in self.buttons.items():
+            btn.configure(
+                fg_color=ACCENT if name == page else "transparent",
+                text_color=SIDEBAR if name == page else TEXT,
+                hover_color=BORDER if name != page else ACCENT,
+            )

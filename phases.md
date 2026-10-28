@@ -37,12 +37,19 @@ snapshot — see [docs/contract-note-import.md](docs/contract-note-import.md).
 **Goal**: Implement the moving weighted-average cost algorithm for calculating portfolio positions.
 
 - [x] Implement calculate_holdings() function
-## Phase 5: CustomTkinter UI 🟡
+## Phase 5: CustomTkinter UI ✅
 
 **Goal**: Build the graphical user interface using CustomTkinter.
 
-- [ ] Main window with sidebar navigation
-- [ ] Dashboard page with KPI cards
+- [x] Main window with sidebar navigation (active page highlighted)
+- [x] Dashboard page with KPI cards (live totals from get_portfolio_summary)
+- [x] Holdings, Transactions, Import, Settings pages wired to the live database
+- [x] Import page drives all five importers incl. the once-only password dialog
+- [x] Display formatting helpers (Indian rupee grouping) with unit tests
+
+(Reports page stays a placeholder until Phase 6; the dashboard chart
+placeholder awaits the live-pricing phase. Verified with a headless smoke
+test that builds every page against the real database.)
 ## Phase 6: Export & Reporting 🔵
 
 **Goal**: Generate reports and exports from portfolio data.
@@ -115,7 +122,7 @@ snapshot — see [docs/contract-note-import.md](docs/contract-note-import.md).
 - Groww tradebook CSV can be parsed and stored
 - Holdings are calculated correctly from imported data
 - PRD.md and Tasks.md documents are complete
-| 5 | 🔵 | CustomTkinter UI |
+| 5 | ✅ | CustomTkinter UI |
 | 6 | 🔵 | Export & Reporting |
 | 7 | 🔵 | Packaging & Deployment |
 | 8 | 🔵 | Advanced Calculations |
