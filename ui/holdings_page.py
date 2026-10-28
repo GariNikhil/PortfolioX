@@ -22,7 +22,7 @@ class HoldingsPage(ctk.CTkFrame):
 
         ctk.CTkLabel(
             self,
-            text="Holdings",
+            text="Stocks",
             font=TITLE_FONT,
             text_color=TEXT,
         ).pack(pady=(40, 4))

@@ -23,7 +23,7 @@ class ReportsPage(ctk.CTkFrame):
 
         ctk.CTkLabel(
             self,
-            text="Reports",
+            text="Demat Report",
             font=TITLE_FONT,
             text_color=TEXT,
         ).pack(pady=(40, 8))

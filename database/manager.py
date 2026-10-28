@@ -624,6 +624,18 @@ def add_import(filename, import_type, status):
         connection.execute(query, (filename, import_type, status))
 
 
+def get_imports(import_type=None):
+    """Import-audit rows, newest first, optionally one import_type only."""
+
+    if import_type is None:
+        return fetch_all("SELECT * FROM imports ORDER BY imported_date DESC")
+    return fetch_all(
+        "SELECT * FROM imports WHERE import_type = ? "
+        "ORDER BY imported_date DESC",
+        (import_type,),
+    )
+
+
 def get_portfolio_summary(account_id=None):
     """Aggregate counts and rupee totals from the holdings cache.
 

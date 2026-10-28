@@ -6,11 +6,15 @@ all accounts); changing it re-renders the cards and the holdings table.
 
 import customtkinter as ctk
 
+from calculations.allocation import asset_allocation
+from calculations.xirr import xirr, xirr_cashflows
 from database.manager import (
     UNASSIGNED,
     get_accounts,
+    get_dividends,
     get_holdings,
     get_portfolio_summary,
+    get_transactions,
 )
 from ui.formatting import format_quantity, format_rupees, kpi_cards
 from ui.theme import *
@@ -62,7 +66,9 @@ class DashboardPage(ctk.CTkFrame):
 
         # ---------------- Renderable body ---------------- #
 
-        self.body = ctk.CTkFrame(self, fg_color="transparent")
+        # Scrollable: KPI cards + holdings + analysis + chart exceed the
+        # window height on smaller screens.
+        self.body = ctk.CTkScrollableFrame(self, fg_color=BACKGROUND)
         self.body.pack(fill="both", expand=True)
 
         self._render()
@@ -95,6 +101,7 @@ class DashboardPage(ctk.CTkFrame):
 
         self._kpi_cards()
         self._holdings_table()
+        self._analysis_section()
         self._chart_placeholder()
 
     def _kpi_cards(self):
@@ -208,6 +215,101 @@ class DashboardPage(ctk.CTkFrame):
                 text_color=TEXT, width=200, anchor="e",
             ).pack(side="left", padx=8)
 
+    def _analysis_section(self):
+        """Portfolio Analysis: seven summary cards under the holdings."""
+
+        section = ctk.CTkLabel(
+            self.body,
+            text="Portfolio Analysis",
+            font=HEADING_FONT,
+            text_color=TEXT
+        )
+
+        section.pack(pady=(24, 6))
+
+        summary = get_portfolio_summary(self._account_id)
+        holdings = get_holdings(self._account_id)
+        invested = summary["total_invested"]
+        market_value = summary["total_market_value"]
+
+        # XIRR only makes sense when something is actually valued; a
+        # zero market value means no prices yet, so show a dash.
+        if market_value > 0:
+            rate = xirr(xirr_cashflows(
+                get_transactions(self._account_id), market_value,
+            ))
+            xirr_text = f"{rate * 100:+.1f}% / yr" if rate is not None else "—"
+        else:
+            xirr_text = "—"
+
+        allocation = asset_allocation(holdings)
+        if invested > 0 and allocation:
+            allocation_text = " · ".join(
+                f"{label} {amount / invested * 100:.0f}%"
+                for label, amount in allocation
+            )
+        else:
+            allocation_text = "—"
+
+        dividend_total = sum(row["amount"] for row in get_dividends())
+
+        cards = (
+            ("Current Holdings", str(len(holdings)),
+             "open positions"),
+            ("Invested", format_rupees(invested),
+             "across all symbols"),
+            ("XIRR", xirr_text,
+             "money-weighted return"),
+            ("Market Cap", "—",
+             "needs stock metadata"),
+            ("Sector Allocation", "—",
+             "needs stock metadata"),
+            ("Asset Allocation", allocation_text,
+             "by invested amount"),
+            ("Dividends", format_rupees(dividend_total),
+             "recorded credits"),
+        )
+
+        grid = ctk.CTkFrame(self.body, fg_color="transparent")
+        grid.pack(fill="x", padx=PADDING)
+
+        per_row = 4
+        for index, (name, value, note) in enumerate(cards):
+            row, column = divmod(index, per_row)
+            grid.grid_rowconfigure(row, weight=1)
+            grid.grid_columnconfigure(column, weight=1)
+
+            card = ctk.CTkFrame(
+                grid,
+                height=110,
+                fg_color=CARD,
+                border_width=1,
+                border_color=BORDER,
+            )
+            card.grid(row=row, column=column, padx=8, pady=8, sticky="nsew")
+            card.pack_propagate(False)
+
+            ctk.CTkLabel(
+                card,
+                text=name,
+                font=SMALL_FONT,
+                text_color=TEXT_SECONDARY,
+            ).pack(pady=(14, 2))
+
+            ctk.CTkLabel(
+                card,
+                text=value,
+                font=ctk.CTkFont(FONT_FAMILY, 20, "bold"),
+                text_color=TEXT,
+            ).pack()
+
+            ctk.CTkLabel(
+                card,
+                text=note,
+                font=SMALL_FONT,
+                text_color=TEXT_SECONDARY,
+            ).pack()
+
     def _chart_placeholder(self):
         chart = ctk.CTkFrame(
             self.body,
@@ -217,8 +319,7 @@ class DashboardPage(ctk.CTkFrame):
         )
 
         chart.pack(
-            fill="both",
-            expand=True,
+            fill="x",
             padx=PADDING,
             pady=PADDING
         )
@@ -228,4 +329,4 @@ class DashboardPage(ctk.CTkFrame):
             text="📈 Portfolio Growth Chart\n(Coming Soon)",
             font=HEADING_FONT,
             text_color=TEXT_SECONDARY
-        ).pack(expand=True)
+        ).pack(pady=80)
