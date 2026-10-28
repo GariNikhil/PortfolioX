@@ -7,12 +7,9 @@ from ui.holdings_hub import HoldingsHubPage
 from ui.import_page import ImportPage
 from ui.learn_page import LearnPage
 from ui.prices_page import PricesPage
-from ui.reports_hub import ReportsHubPage
-from ui.settings_page import SettingsPage
-from ui.tax_page import TaxPage
+from ui.settings_hub import SettingsHubPage
 from ui.theme import *
 from ui.transactions_page import TransactionsPage
-from ui.vault_page import VaultPage
 
 
 class PortfolioX(ctk.CTk):
@@ -65,9 +62,8 @@ class PortfolioX(ctk.CTk):
 
         # ---------------- Navigation ---------------- #
 
-        # Flat list; Holdings and Reports are hub pages whose sub-pages
-        # (Stocks, Mutual Funds, ... / Demat Report, ...) live behind a
-        # tab bar at the top of the content area.
+        # Flat list; Holdings, Reports and Settings are hub pages whose
+        # sub-pages live behind a tab bar at the top of the content area.
         self.menu = (
             ("Dashboard", DashboardPage),
             ("Accounts", AccountsPage),
@@ -75,12 +71,9 @@ class PortfolioX(ctk.CTk):
             ("Holdings", HoldingsHubPage),
             ("Prices", PricesPage),
             ("Transactions", TransactionsPage),
-            ("Reports", ReportsHubPage),
             ("Dividends", DividendsPage),
-            ("Tax", TaxPage),
-            ("Pass Vault", VaultPage),
             ("Learn", LearnPage),
-            ("Settings", SettingsPage),
+            ("Settings", SettingsHubPage),
         )
 
         self.buttons = {}
