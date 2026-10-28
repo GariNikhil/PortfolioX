@@ -44,7 +44,7 @@ Format quirks and how the importer handles them:
 
 | Quirk in the real file | Handling |
 |---|---|
-| **No date column anywhere** (it is a multi-day concatenation; each day-block repeats the header) | `trade_date` is a required argument applied to every row. A multi-day workbook must be split by block first; the blocks are not machine-datable (order numbers cluster by day, but that is an assumption, not a fact). |
+| **No date column anywhere** (it is a manual amalgamation; see below) | `trade_date` is a required argument applied to every row. |
 | Repeated header rows, one variant starting with `Order no.` and a shifted variant with `Column1` in column A | Both are detected (whitespace/newlines inside header cells are collapsed before matching) and skipped. |
 | Per-instrument `Total` rows and block `Net Total` rows | Any of the first five cells equal to `total` or containing `net total` is skipped. |
 | `Buy(B)/Sell(S)` column; sells stored as negative quantities | Side comes from B/S; when the cell is empty the quantity sign decides (e.g. expired-option rows). |
@@ -54,6 +54,32 @@ Format quirks and how the importer handles them:
 
 Result on the real file (scratch DB, `trade_date=2023-07-03`):
 **281 parsed rows → 278 imported, 3 oversell failures** (the demat sells).
+
+### Why the Orders workbook cannot be self-dated (block analysis, Oct 2026)
+
+A full block analysis of `inter (1).xlsx` settled the dating question:
+
+- The Orders sheet has **29 header-delimited blocks**, not clean day-blocks.
+  They are **not chronological**: block 1's times run 09:36→09:35, trade
+  numbers jump wildly between blocks, and 03-Aug-expiry instruments appear
+  in the *last* blocks between equity rows.
+- The blocks came from **different sources**: blocks 1–17 use spaced symbol
+  text (`BANKNIFTY 45500 CE 13 Jul 2023`), blocks 18–24 a no-space variant
+  (`BANKNIFTY45500PE27Jul2023`) that matches PDF text extraction.
+- One hard anchor exists: **block 18 is 2023-07-27** — its first row
+  (order `1800000000000000`, trade `698000000`, 12:12:53) is byte-identical
+  to the first trade of the unencrypted contract note `28.pdf`
+  (Trade date 27-07-2023).
+- The workbook's own **Settlement sheet (16 dated settlement blocks,
+  2023-07-03 → 2023-08-01) and P&L sheet cannot be joined** to Orders rows:
+  Orders rows carry no settlement numbers.
+
+**Dating strategy going forward:** contract notes repeat the same
+(order no, trade no) pairs as the Orders sheet. Once the encrypted PDFs
+are unlocked and imported (they self-date), Orders blocks can be dated by
+matching their trade numbers against the imported PDF trades. Until then
+the workbook stays unimported — stamping 29 mixed-source blocks with one
+date would corrupt the record.
 
 ## `importers/iifl.py` — Trade Listing .xls
 
@@ -163,9 +189,12 @@ schema v2) merges them **at holdings-aggregation time only**:
   06-2022 pair must be entered once by the user (or discovered from broker
   conventions such as PAN case variants); until then those files cannot be
   imported.
-- **Multi-day Orders workbooks** need to be split into per-date files (one
-  `trade_date` per import) until the day boundaries can be established from
-  broker metadata.
+- **Multi-day Orders workbooks cannot be dated from their contents** (29
+  non-chronological, mixed-source blocks; one hard anchor: block 18 =
+  2023-07-27 via trade-number match with 28.pdf). The path forward is to
+  unlock the encrypted PDFs, import them (they self-date), then date
+  Orders blocks by matching (order no, trade no) against the imported
+  PDF trades.
 - The UI import page (Phase 6) will surface `ImportResult.summary()` and
   the failure list; the audit trail already distinguishes import kinds:
   `GROWW_TRADEBOOK`, `CONTRACT_NOTE_ORDERS`, `IIFL_TRADE_LISTING`,

@@ -88,7 +88,8 @@ def route_file(path, orders_date):
     if name.endswith(".xlsx"):
         if "stocksledger" not in name and orders_date:
             return "orders", ""
-        return None, "Orders workbook needs --orders-date (rows carry no dates)"
+        return None, ("Orders workbooks are undatable (mixed-source blocks); "
+                      "see docs/contract-note-import.md")
     if name.endswith((".csv", ".xls")):
         return None, "no recognized importer for this file"
     return None, "not an importable file type"
