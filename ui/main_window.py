@@ -70,7 +70,8 @@ class PortfolioX(ctk.CTk):
 
         # Grouped menu: (section label or None, [(page name, factory)]).
         # Factories take the parent frame, so pages needing constructor
-        # arguments are wrapped in lambdas.
+        # arguments are wrapped in lambdas. Grouped sections render as
+        # collapsible drop-lists (collapsed by default).
         self.menu = (
             (None, (
                 ("Dashboard", DashboardPage),
@@ -123,41 +124,83 @@ class PortfolioX(ctk.CTk):
         )
 
         self.buttons = {}
+        self.sections = {}  # label -> {"header", "body", "open", "pages"}
 
+        # Grid (not pack) inside the scrollable frame: hiding a section
+        # body with grid_remove keeps every other row in place.
         nav = ctk.CTkScrollableFrame(
             self.sidebar,
             width=SIDEBAR_WIDTH - 20,
             fg_color=SIDEBAR,
         )
         nav.pack(fill="both", expand=True, padx=(0, 4), pady=(0, 8))
+        nav.grid_columnconfigure(0, weight=1)
+
+        row = 0
 
         for label, items in self.menu:
 
-            if label is not None:
-                ctk.CTkLabel(
-                    nav,
-                    text=label,
-                    font=(FONT_FAMILY, 12, "bold"),
-                    text_color=TEXT_SECONDARY,
-                    anchor="w",
-                ).pack(fill="x", padx=14, pady=(10, 2))
+            if label is None:
+                for name, factory in items:
+                    btn = ctk.CTkButton(
+                        nav,
+                        text=name,
+                        width=180,
+                        height=42,
+                        fg_color="transparent",
+                        text_color=TEXT,
+                        hover_color=BORDER,
+                        command=lambda x=name: self.show_page(x),
+                    )
+                    btn.grid(row=row, column=0, sticky="ew", padx=6, pady=2)
+                    row += 1
+                    self.buttons[name] = btn
+                continue
 
+            # Collapsible section: header toggles the body frame.
+            header = ctk.CTkButton(
+                nav,
+                text=f"▸  {label}",
+                width=180,
+                height=32,
+                font=(FONT_FAMILY, 12, "bold"),
+                anchor="w",
+                fg_color="transparent",
+                text_color=TEXT_SECONDARY,
+                hover_color=BORDER,
+                command=lambda l=label: self.toggle_section(l),
+            )
+            header.grid(row=row, column=0, sticky="ew", padx=6, pady=(8, 2))
+            row += 1
+
+            body = ctk.CTkFrame(nav, fg_color="transparent")
             for name, factory in items:
-                sub = label is not None
                 btn = ctk.CTkButton(
-                    nav,
-                    text=("    " + name) if sub else name,
+                    body,
+                    text="    " + name,
                     width=180,
-                    height=38 if sub else 42,
-                    font=SMALL_FONT if sub else ctk.CTkFont(size=15),
-                    anchor="w" if sub else "center",
+                    height=38,
+                    font=SMALL_FONT,
+                    anchor="w",
                     fg_color="transparent",
                     text_color=TEXT,
                     hover_color=BORDER,
                     command=lambda x=name: self.show_page(x),
                 )
-                btn.pack(pady=2, padx=6)
+                btn.pack(pady=1, padx=(14, 0))
                 self.buttons[name] = btn
+
+            # Collapsed by default: grid_remove-friendly grid() then forget.
+            body.grid(row=row, column=0, sticky="ew")
+            row += 1
+            body.grid_remove()
+
+            self.sections[label] = {
+                "header": header,
+                "body": body,
+                "open": False,
+                "pages": [name for name, _ in items],
+            }
 
         self.current_page = None
 
@@ -169,6 +212,30 @@ class PortfolioX(ctk.CTk):
 
         self.show_page("Dashboard")
 
+    # ---------------- Section toggling ---------------- #
+
+    def toggle_section(self, label):
+        section = self.sections[label]
+        section["open"] = not section["open"]
+        self._apply_section(label)
+
+    def _apply_section(self, label):
+        section = self.sections[label]
+        arrow = "▾" if section["open"] else "▸"
+        section["header"].configure(text=f"{arrow}  {label}")
+        if section["open"]:
+            section["body"].grid()
+        else:
+            section["body"].grid_remove()
+
+    def _ensure_section_open(self, page):
+        """Open the section containing page, so its highlight is visible."""
+
+        for label, section in self.sections.items():
+            if page in section["pages"] and not section["open"]:
+                section["open"] = True
+                self._apply_section(label)
+
     # ---------------- Page Navigation ---------------- #
 
     def show_page(self, page):
@@ -176,6 +243,7 @@ class PortfolioX(ctk.CTk):
         if self.current_page is not None:
             self.current_page.destroy()
         self.current_page = factory(self.content)
+        self._ensure_section_open(page)
 
         # Highlight the active navigation button.
         for name, btn in self.buttons.items():
