@@ -1,0 +1,22 @@
+# Byte-compiled files / caches
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+.venv/
+
+# Local data and generated artifacts (never commit financial files)
+data/
+backups/
+exports/
+
+# Personal reference material: broker statements, contract notes, ledgers
+# (readme policy: never commit real tradebooks, contract notes, or financial files)
+referance/
+referance notes/
+
+# Vendored third-party skill collections (not project source)
+.clinerules/skills/
+
+# Editor state
+.vscode/
