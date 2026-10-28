@@ -1,0 +1,217 @@
+"""Shared helpers for the importer modules.
+
+Every importer returns the same ImportResult shape, raises ImportFileError
+for file-level problems, and normalizes dates and numbers the same way, so
+the UI can treat all import paths uniformly.
+"""
+
+import math
+import re
+from dataclasses import dataclass, field
+from datetime import date, datetime
+
+from database import manager
+
+DATE_FORMATS = ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d %b %Y", "%d %B %Y")
+
+CURRENCY_MARKS = (",", "₹", "Rs", "rs", "INR")
+
+
+class ImportFileError(Exception):
+    """Raised when a file cannot be parsed as the expected import format."""
+
+
+@dataclass(frozen=True)
+class RowFailure:
+    """One rejected data row, with its 1-based file row number and reason."""
+
+    row_number: int
+    reason: str
+
+
+@dataclass
+class ImportResult:
+    """Summary of one import attempt (the report the UI will show)."""
+
+    filename: str
+    imported: int = 0
+    duplicates: int = 0
+    failures: list = field(default_factory=list)
+
+    def summary(self):
+        return (
+            f"{self.filename}: {self.imported} imported, "
+            f"{self.duplicates} duplicates, {len(self.failures)} failed rows"
+        )
+
+
+def normalize_date(value):
+    """Accept display dates and normalize to ISO-8601 YYYY-MM-DD text."""
+
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+
+    text = str(value or "").strip()
+    for fmt in DATE_FORMATS:
+        try:
+            return datetime.strptime(text, fmt).date().isoformat()
+        except ValueError:
+            continue
+    raise ValueError(
+        f"invalid date '{text}' (supported: YYYY-MM-DD, DD-MM-YYYY, "
+        "DD/MM/YYYY, DD Mon YYYY)"
+    )
+
+
+def parse_number(value, field_name, positive=False):
+    """Parse a number cell that may carry currency or thousands marks."""
+
+    text = str(value if value is not None else "").strip()
+    for mark in CURRENCY_MARKS:
+        text = text.replace(mark, "")
+    text = text.strip()
+
+    try:
+        number = float(text)
+    except ValueError:
+        raise ValueError(f"invalid {field_name} '{value}' (expected a number)") from None
+
+    if not math.isfinite(number):
+        raise ValueError(f"invalid {field_name} '{value}' (not a finite number)")
+
+    if positive and number <= 0:
+        raise ValueError(f"invalid {field_name} '{value}' (must be a positive number)")
+    if not positive and number < 0:
+        raise ValueError(f"invalid {field_name} '{value}' (cannot be negative)")
+
+    return number
+
+
+def is_blank_row(row):
+    """Report whether a raw row carries no data at all."""
+
+    return not any(str(cell).strip() if cell is not None else "" for cell in row)
+
+
+def clean_symbol(value):
+    """Strip a symbol/instrument cell, collapsing runs of internal whitespace."""
+
+    return re.sub(r"\s+", " ", str(value or "").strip())
+
+
+def trade_key(row):
+    """Identity of a trade for re-import detection.
+
+    Built from (date, symbol, side, quantity, gross price in paise). Note:
+    two genuinely identical same-day trades at the same price share a key,
+    so a re-import treats the second one as a duplicate. This is the
+    documented trade-off of content-key idempotency.
+    """
+
+    return (
+        row["trade_date"],
+        str(row["symbol"]).upper(),
+        row["transaction_type"],
+        round(float(row["quantity"]), 4),
+        round(float(row["price"] or 0) * 100),
+    )
+
+
+def existing_trade_keys():
+    """Content keys of every transaction already stored (for duplicate skips)."""
+
+    return {trade_key(row) for row in manager.get_transactions()}
+
+
+def record_import(filename, source_kind, status):
+    """Write the attempt to the imports audit table (never raises)."""
+
+    try:
+        manager.add_import(filename, source_kind, status)
+    except Exception:  # the audit trail must not mask the real error
+        pass
+
+
+def _split_oversells(pending):
+    """Split pending rows into (insertable, oversell_rows) without touching the DB.
+
+    calculate_holdings() refuses to rebuild when any SELL exceeds the
+    position built so far (e.g. a contract note selling shares bought in an
+    earlier period, or held in demat). One such row would otherwise fail the
+    whole batch. Mirroring its ordering (trade date, then insertion order)
+    and 1e-9 tolerance, rows that would oversell are rejected up-front so
+    the rest of the file still imports; the position state after this
+    simulation is exactly what rebuild_holdings() will see.
+    """
+
+    positions = {
+        str(holding["symbol"]).upper(): float(holding["quantity"])
+        for holding in manager.get_holdings()
+    }
+
+    insertable, oversells = [], []
+    for order, row in enumerate(sorted(pending, key=lambda r: r["trade_date"])):
+        symbol = str(row["symbol"]).upper()
+        held = positions.get(symbol, 0.0)
+        quantity = float(row["quantity"])
+
+        if row["transaction_type"] == "SELL" and quantity > held + 1e-9:
+            oversells.append((order, row, held))
+            continue
+
+        if row["transaction_type"] == "BUY":
+            positions[symbol] = held + quantity
+        else:
+            positions[symbol] = max(held - quantity, 0.0)
+        insertable.append(row)
+
+    return insertable, oversells
+
+
+def commit_import(filename, source_kind, rows, failures, skip_duplicates=True):
+    """Shared import-commit flow: dedupe, drop oversells, insert atomically, audit-log.
+
+    The caller has already parsed the file (so `rows` are manager-ready
+    mappings and `failures` the row-level rejections) and handled the
+    "no importable rows" case. Rows that would oversell current holdings —
+    legitimate in real contract notes that sell shares bought elsewhere —
+    are converted into row-level failures instead of failing the batch.
+    Returns the ImportResult; raises ImportFileError only if the database
+    rejects the batch.
+    """
+
+    result = ImportResult(filename=filename, failures=list(failures))
+
+    pending = rows
+    if skip_duplicates:
+        existing = existing_trade_keys()
+        pending = [row for row in rows if trade_key(row) not in existing]
+        result.duplicates = len(rows) - len(pending)
+
+    pending, oversells = _split_oversells(pending)
+    for _order, row, held in oversells:
+        result.failures.append(RowFailure(
+            row_number=0,
+            reason=(
+                f"cannot sell {row['quantity']:g} of {row['symbol']}: only "
+                f"{held:g} held at that point (the earlier buys are not part "
+                "of this import)"
+            ),
+        ))
+
+    if not pending:
+        record_import(filename, source_kind, "SUCCESS")
+        return result
+
+    try:
+        manager.add_transactions(pending)
+        manager.rebuild_holdings()
+    except Exception as error:  # batch rejected: keep the audit log truthful
+        record_import(filename, source_kind, f"FAILED ({error})")
+        raise ImportFileError(f"database rejected the batch: {error}") from error
+
+    result.imported = len(pending)
+    record_import(filename, source_kind, "SUCCESS")
+    return result

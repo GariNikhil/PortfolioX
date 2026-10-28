@@ -7,6 +7,9 @@ customtkinter==6.0.0
 # Groww tradebook import: XLSX reading (CSV parsing uses the stdlib csv module)
 openpyxl==3.1.5
 
+# Real broker file import: IIFL Trade Listing .xls (legacy OLE2 format)
+xlrd==2.0.2
+
 # Planned for later phases (uncomment when adopted):
 # pdfplumber   (contract-note PDF parsing)
 # matplotlib   (charts)

@@ -13,14 +13,20 @@ rejected with a message naming the missing columns instead of importing junk.
 """
 
 import csv
-import math
 import re
 import warnings
-from dataclasses import dataclass, field
-from datetime import date, datetime
 from pathlib import Path
 
 from database import manager
+from importers.common import (
+    ImportFileError,
+    ImportResult,  # re-exported: callers construct results via groww's API
+    RowFailure,
+    commit_import,
+    is_blank_row as _is_blank,
+    normalize_date as _normalize_date,
+    parse_number as _parse_number,
+)
 
 try:
     import openpyxl
@@ -70,32 +76,9 @@ SYMBOL_PATTERN = re.compile(r"^[A-Za-z0-9&._\-/ ]+$")
 ISIN_PATTERN = re.compile(r"^[A-Za-z]{2}[A-Za-z0-9]{9}[0-9]$")
 
 
-class GrowwImportError(Exception):
-    """Raised when a file cannot be parsed as a Groww tradebook at all."""
-
-
-@dataclass(frozen=True)
-class RowFailure:
-    """One rejected data row, with its 1-based file row number and reason."""
-
-    row_number: int
-    reason: str
-
-
-@dataclass
-class ImportResult:
-    """Summary of one import attempt (the Phase 3 report the UI will show)."""
-
-    filename: str
-    imported: int = 0
-    duplicates: int = 0
-    failures: list = field(default_factory=list)
-
-    def summary(self):
-        return (
-            f"{self.filename}: {self.imported} imported, "
-            f"{self.duplicates} duplicates, {len(self.failures)} failed rows"
-        )
+# Error type is shared across all importers; the Groww name stays for
+# compatibility with the first importer's public API.
+GrowwImportError = ImportFileError
 
 
 def import_groww_tradebook(path, skip_duplicates=True):
@@ -121,28 +104,7 @@ def import_groww_tradebook(path, skip_duplicates=True):
         _record_import(filename, message)
         raise GrowwImportError(f"{filename} contains no importable data rows")
 
-    result = ImportResult(filename=filename, failures=failures)
-
-    pending = rows
-    if skip_duplicates:
-        existing = _existing_trade_keys()
-        pending = []
-        for row in rows:
-            if _trade_key(row) in existing:
-                result.duplicates += 1
-            else:
-                pending.append(row)
-
-    try:
-        manager.add_transactions(pending)
-        manager.rebuild_holdings()
-    except Exception as error:  # batch rejected: keep the audit log truthful
-        _record_import(filename, f"FAILED ({error})")
-        raise GrowwImportError(f"database rejected the batch: {error}") from error
-
-    result.imported = len(pending)
-    _record_import(filename, "SUCCESS")
-    return result
+    return commit_import(filename, "GROWW_TRADEBOOK", rows, failures, skip_duplicates)
 
 
 def parse_groww_tradebook(path):
@@ -381,50 +343,6 @@ def _parse_row(row, row_number, columns):
     }
 
 
-def _normalize_date(value):
-    """Accept display dates and normalize to ISO-8601 YYYY-MM-DD text."""
-
-    if isinstance(value, datetime):
-        return value.date().isoformat()
-    if isinstance(value, date):
-        return value.isoformat()
-
-    text = str(value or "").strip()
-    for fmt in DATE_FORMATS:
-        try:
-            return datetime.strptime(text, fmt).date().isoformat()
-        except ValueError:
-            continue
-    raise ValueError(
-        f"invalid date '{text}' (supported: YYYY-MM-DD, DD-MM-YYYY, "
-        "DD/MM/YYYY, DD Mon YYYY)"
-    )
-
-
-def _parse_number(value, field_name, positive):
-    """Parse a rupee/quantity cell that may carry currency or thousands marks."""
-
-    text = str(value if value is not None else "").strip()
-    for mark in (",", "₹", "Rs", "rs", "INR"):
-        text = text.replace(mark, "")
-    text = text.strip()
-
-    try:
-        number = float(text)
-    except ValueError:
-        raise ValueError(f"invalid {field_name} '{value}' (expected a number)") from None
-
-    if not math.isfinite(number):
-        raise ValueError(f"invalid {field_name} '{value}' (not a finite number)")
-
-    if positive and number <= 0:
-        raise ValueError(f"invalid {field_name} '{value}' (must be a positive number)")
-    if not positive and number < 0:
-        raise ValueError(f"invalid {field_name} '{value}' (cannot be negative)")
-
-    return number
-
-
 def _existing_trade_keys():
     """Content keys of every transaction already stored (for duplicate skips)."""
 
@@ -432,28 +350,6 @@ def _existing_trade_keys():
     for row in manager.get_transactions():
         keys.add(_trade_key(row))
     return keys
-
-
-def _trade_key(row):
-    """Identity of a trade for re-import detection.
-
-    Built from (date, symbol, side, quantity, gross price in paise). Note:
-    two genuinely identical same-day trades at the same price share a key,
-    so a re-import treats the second one as a duplicate. This is the
-    documented trade-off of content-key idempotency.
-    """
-
-    return (
-        row["trade_date"],
-        str(row["symbol"]).upper(),
-        row["transaction_type"],
-        round(float(row["quantity"]), 4),
-        _to_paise_key(row["price"]),
-    )
-
-
-def _to_paise_key(rupee_price):
-    return round(float(rupee_price or 0) * 100)
 
 
 def _record_import(filename, status):

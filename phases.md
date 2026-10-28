@@ -28,6 +28,10 @@ PortfolioX is a local-first desktop portfolio management application designed fo
 
 (The UI upload page is part of Phase 6. Implementation notes and the
 reference-file findings live in [docs/groww-import.md](docs/groww-import.md).)
+
+Extend Phase 3 to the real broker files in referance/stock/: contract-note
+Orders sheets, IIFL Trade Listing .xls and the stocksledger Portfolio
+snapshot — see [docs/contract-note-import.md](docs/contract-note-import.md).
 ## Phase 4: Holdings Calculator ✅
 
 **Goal**: Implement the moving weighted-average cost algorithm for calculating portfolio positions.
@@ -61,8 +65,13 @@ reference-file findings live in [docs/groww-import.md](docs/groww-import.md).)
 
 **Goal**: Support imports from multiple broker platforms.
 
-- [ ] Support Groww tradebook import (Phase 3)
-- [ ] Create import result reporting (successes, failures, warnings)
+- [x] Support Groww tradebook import (Phase 3)
+- [x] Support contract-note Orders sheet import (undated rows; caller supplies the trade date)
+- [x] Support IIFL Trade Listing .xls import (dated rows, buy+sell sides per instrument)
+- [x] Support stocksledger Portfolio snapshot import (hand-entered holdings imported as BUYs)
+- [x] Create import result reporting (successes, failures, warnings) via ImportResult
+- [ ] Contract-note PDF parsing (encrypted files pending the password-locker decision)
+- [ ] Cross-source symbol identity (e.g. VEDANTA vs VEDANTA LIMITED from different files)
 ## Phase 10: Data Synchronization & Backups 🔵
 
 **Goal**: Local data protection and recovery.

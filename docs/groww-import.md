@@ -5,6 +5,11 @@
 ### Overview
 The Groww Import System (Phase 3) enables PortfolioX to parse Groww tradebook CSV/XLSX files and integrate the parsed data into the existing SQLite database layer established in Phase 2.
 
+> Real broker files (contract-note Orders sheets, IIFL Trade Listing .xls,
+> stocksledger Portfolio snapshot) are covered separately in
+> [docs/contract-note-import.md](contract-note-import.md); all importers
+> share their helpers through `importers/common.py`.
+
 ### Features
 - Parse Groww CSV tradebook format
 - Parse Groww XLSX tradebook format
