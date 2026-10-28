@@ -81,12 +81,12 @@ test that builds every page against the real database.)
 - [x] Secure password vault (AES-GCM + OS keystore; once-only password prompt)
 - [x] Cross-source symbol identity (symbol_aliases table, applied at holdings aggregation)
 - [ ] Real encrypted contract-note PDFs: waiting for the user to enter each note's password once (vault flow is ready and tested)
-## Phase 10: Data Synchronization & Backups 🔵
+## Phase 10: Data Synchronization & Backups ✅
 
 **Goal**: Local data protection and recovery.
 
-- [ ] Automatic database backup on import
-- [ ] Add idempotent import (skip already-imported transactions)
+- [x] Automatic database backup on import (database/backup.py; CLI and UI Import page snapshot data/portfoliox.db into data/backups/ before the first write; keeps the 20 newest)
+- [x] Add idempotent import (skip already-imported transactions) (content-key duplicate skip, Phase 3)
 ## Phase 11: Testing & Quality 🔵
 
 **Goal**: Ensure code quality and reliability.
@@ -115,7 +115,7 @@ test that builds every page against the real database.)
 1. Verify database schema creation from project root — ✅ done (ensure_schema at startup)
 2. Create importers/groww.py with CSV parsing — ✅ done (CSV + XLSX)
 3. Write PRD.md and Tasks.md documentation — ⬜ not done (PRD lives in PortfolioX_Documentation; a Tasks breakdown was never written)
-4. Test the full pipeline: import → calculate → display — 🟡 import → calculate covered by the test suite; display is pending the Phase 5/6 UI wiring
+4. Test the full pipeline: import → calculate → display — ✅ done (Phases 5/6: live UI pages + report exports)
 
 **Success Criteria**:
 - Database tables create successfully from project root
@@ -127,7 +127,7 @@ test that builds every page against the real database.)
 | 7 | 🔵 | Packaging & Deployment |
 | 8 | 🔵 | Advanced Calculations |
 | 9 | 🔵 | Multi-Broker Support |
-| 10 | 🔵 | Data Synchronization & Backups |
+| 10 | ✅ | Data Synchronization & Backups |
 | 11 | 🔵 | Testing & Quality |
 | 12 | 🔵 | Production Release |
 - [x] Add portfolio summary functions

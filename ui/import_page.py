@@ -16,6 +16,7 @@ from importers.groww import import_groww_tradebook
 from importers.iifl import import_iifl_trade_listing
 from importers.pdf_note import import_contract_note_pdf
 from importers.stocksledger import import_stocksledger_portfolio
+from database.backup import backup_database
 from security.vault import PasswordRequiredError, VaultError, store_password
 from ui.theme import *
 
@@ -36,6 +37,7 @@ class ImportPage(ctk.CTkFrame):
         self.pack(fill="both", expand=True)
 
         self.file_path = None
+        self.backup_path = None
 
         ctk.CTkLabel(
             self,
@@ -137,6 +139,11 @@ class ImportPage(ctk.CTkFrame):
         label = self.source_menu.get()
         kind, importer, needs_date = _IMPORTERS[label]
 
+        # One snapshot per import attempt: a failed attempt that wrote
+        # nothing (e.g. cancelled password dialog) leaves it valid for the
+        # retry below, so no second backup is needed.
+        self.backup_path = backup_database()
+
         try:
             if needs_date:
                 result = importer(self.file_path, self.date_entry.get().strip())
@@ -150,6 +157,8 @@ class ImportPage(ctk.CTkFrame):
             return
 
         lines = [result.summary()]
+        if self.backup_path:
+            lines.append(f"Pre-import backup: {self.backup_path}")
         if result.failures:
             lines.append("Rejected rows:")
             lines.extend(

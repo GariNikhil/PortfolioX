@@ -43,6 +43,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from database import db  # noqa: E402  (path setup must come first)
+from database.backup import backup_database  # noqa: E402
 from database.schema import ensure_schema  # noqa: E402
 from importers.common import ImportFileError  # noqa: E402
 from security.vault import (  # noqa: E402
@@ -267,6 +268,9 @@ def main(argv=None):
 
     if not args.dry_run:
         ensure_schema()
+        backup = backup_database()
+        if backup:
+            print(f"database backed up: {backup}\n")
 
     files = sorted(
         path for path in root.rglob("*")
