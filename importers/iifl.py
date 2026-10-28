@@ -67,7 +67,7 @@ COLUMN_ALIASES = {
 SOURCE_KIND = "IIFL_TRADE_LISTING"
 
 
-def import_iifl_trade_listing(path, skip_duplicates=True):
+def import_iifl_trade_listing(path, skip_duplicates=True, account_id=None):
     """Import an IIFL Trade Listing .xls and return an ImportResult.
 
     File-level problems (missing file, wrong sheet, no data rows) raise
@@ -90,7 +90,8 @@ def import_iifl_trade_listing(path, skip_duplicates=True):
         record_import(filename, SOURCE_KIND, f"FAILED ({message})")
         raise ImportFileError(message)
 
-    return commit_import(filename, SOURCE_KIND, rows, failures, skip_duplicates)
+    return commit_import(filename, SOURCE_KIND, rows, failures, skip_duplicates,
+                         account_id)
 
 
 def parse_iifl_trade_listing(path):

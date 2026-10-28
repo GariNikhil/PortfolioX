@@ -17,6 +17,7 @@ from importers.iifl import import_iifl_trade_listing
 from importers.pdf_note import import_contract_note_pdf
 from importers.stocksledger import import_stocksledger_portfolio
 from database.backup import backup_database
+from database.manager import get_accounts
 from security.vault import PasswordRequiredError, VaultError, store_password
 from ui.theme import *
 
@@ -91,6 +92,22 @@ class ImportPage(ctk.CTkFrame):
         self.date_entry = ctk.CTkEntry(self.date_frame, width=140, placeholder_text="2023-07-03")
         self.date_entry.pack(side="left")
 
+        # ---------------- Account choice ---------------- #
+
+        account_row = ctk.CTkFrame(self, fg_color="transparent")
+        account_row.pack(pady=4)
+
+        ctk.CTkLabel(
+            account_row,
+            text="Assign to account:",
+            font=BODY_FONT,
+            text_color=TEXT,
+        ).pack(side="left", padx=(0, 8))
+
+        self.account_menu = ctk.CTkOptionMenu(account_row, values=self._account_choices(), width=240)
+        self.account_menu.set(self._account_choices()[0])
+        self.account_menu.pack(side="left")
+
         # ---------------- Run ---------------- #
 
         ctk.CTkButton(
@@ -123,6 +140,23 @@ class ImportPage(ctk.CTkFrame):
             self.file_path = Path(path)
             self.file_label.configure(text=str(self.file_path), text_color=TEXT)
 
+    @staticmethod
+    def _account_choices():
+        """Dropdown options; 'Unassigned' maps to account_id None."""
+
+        choices = ["Unassigned"]
+        choices.extend(account["name"] for account in get_accounts())
+        return choices
+
+    def _selected_account_id(self):
+        """The account chosen in the dropdown, or None for Unassigned."""
+
+        choice = self.account_menu.get()
+        for account in get_accounts():
+            if account["name"] == choice:
+                return account["id"]
+        return None
+
     def _source_changed(self, choice):
         if _IMPORTERS[choice][2]:
             self.date_frame.pack(pady=4)
@@ -145,10 +179,12 @@ class ImportPage(ctk.CTkFrame):
         self.backup_path = backup_database()
 
         try:
+            account_id = self._selected_account_id()
             if needs_date:
-                result = importer(self.file_path, self.date_entry.get().strip())
+                result = importer(self.file_path, self.date_entry.get().strip(),
+                                  account_id=account_id)
             else:
-                result = importer(self.file_path)
+                result = importer(self.file_path, account_id=account_id)
         except PasswordRequiredError:
             self._handle_missing_password(kind)
             return
@@ -186,10 +222,12 @@ class ImportPage(ctk.CTkFrame):
             store_password(kind, password.strip())
             label = self.source_menu.get()
             importer = _IMPORTERS[label][1]
+            account_id = self._selected_account_id()
             if _IMPORTERS[label][2]:
-                result = importer(self.file_path, self.date_entry.get().strip())
+                result = importer(self.file_path, self.date_entry.get().strip(),
+                                  account_id=account_id)
             else:
-                result = importer(self.file_path)
+                result = importer(self.file_path, account_id=account_id)
         except Exception as error:
             # includes a rejected password (PasswordRequiredError again)
             self._report(f"Import failed: {error}", error=True)

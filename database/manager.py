@@ -15,6 +15,25 @@ from calculations.holdings import calculate_holdings
 
 PAISE_PER_RUPEE = 100
 
+# Sentinel account filter: rows with account_id IS NULL ("Unassigned").
+# Real account ids come from the accounts table (positive integers), so a
+# negative sentinel can never collide.
+UNASSIGNED = -1
+
+
+def _account_filter(account_id, column="account_id"):
+    """SQL fragment + params for an account scope.
+
+    None -> every account; UNASSIGNED -> account_id IS NULL; otherwise an
+    equality on the given account id.
+    """
+
+    if account_id is None:
+        return "", ()
+    if account_id == UNASSIGNED:
+        return f"WHERE {column} IS NULL", ()
+    return f"WHERE {column} = ?", (account_id,)
+
 # One rebuilt holdings row, before it is written to the cache.
 RebuiltHolding = namedtuple(
     "RebuiltHolding",
@@ -169,15 +188,12 @@ def delete_transaction(transaction_id):
 def get_transactions(account_id=None):
     """Transactions, newest trade date first, money in rupees.
 
-    account_id filters to one account; None means every account.
+    account_id filters to one account (UNASSIGNED for account-less rows);
+    None means every account.
     """
 
-    query = "SELECT * FROM transactions"
-    params = ()
-    if account_id is not None:
-        query += " WHERE account_id = ?"
-        params = (account_id,)
-    query += " ORDER BY trade_date DESC"
+    fragment, params = _account_filter(account_id)
+    query = f"SELECT * FROM transactions {fragment} ORDER BY trade_date DESC"
 
     return [
         _to_rupees(row, TRANSACTION_MONEY_COLUMNS)
@@ -310,17 +326,16 @@ def rebuild_holdings():
 def get_holdings(account_id=None):
     """Holdings rows, symbols ascending, money in rupees, with account name.
 
-    account_id filters to one account; None means every account.
+    account_id filters to one account (UNASSIGNED for account-less rows);
+    None means every account.
     """
 
-    query = """
+    fragment, params = _account_filter(account_id, "holdings.account_id")
+    query = f"""
     SELECT holdings.*, accounts.name AS account_name
     FROM holdings LEFT JOIN accounts ON accounts.id = holdings.account_id
+    {fragment}
     """
-    params = ()
-    if account_id is not None:
-        query += " WHERE holdings.account_id = ?"
-        params = (account_id,)
     query += " ORDER BY holdings.symbol ASC"
 
     return [
@@ -612,17 +627,12 @@ def add_import(filename, import_type, status):
 def get_portfolio_summary(account_id=None):
     """Aggregate counts and rupee totals from the holdings cache.
 
-    account_id scopes the numbers to one account; None means every
-    account (including Unassigned).
+    account_id scopes the numbers to one account (UNASSIGNED for
+    account-less rows); None means every account.
     """
 
-    holding_filter = ""
-    transaction_filter = ""
-    params = ()
-    if account_id is not None:
-        holding_filter = "WHERE account_id = ?"
-        transaction_filter = "WHERE account_id = ?"
-        params = (account_id,)
+    holding_filter, params = _account_filter(account_id)
+    transaction_filter, _ = _account_filter(account_id)
 
     connection = create_connection()
     cursor = connection.cursor()

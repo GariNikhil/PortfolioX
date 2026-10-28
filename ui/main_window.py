@@ -1,8 +1,10 @@
 import customtkinter as ctk
 
+from ui.accounts_page import AccountsPage
 from ui.dashboard import DashboardPage
 from ui.holdings_page import HoldingsPage
 from ui.import_page import ImportPage
+from ui.prices_page import PricesPage
 from ui.reports_page import ReportsPage
 from ui.settings_page import SettingsPage
 from ui.theme import *
@@ -63,8 +65,10 @@ class PortfolioX(ctk.CTk):
 
         menu = [
             "Dashboard",
+            "Accounts",
             "Import",
             "Holdings",
+            "Prices",
             "Transactions",
             "Reports",
             "Settings"
@@ -88,8 +92,10 @@ class PortfolioX(ctk.CTk):
 
         self.pages = {
             "Dashboard": DashboardPage,
+            "Accounts": AccountsPage,
             "Import": ImportPage,
             "Holdings": HoldingsPage,
+            "Prices": PricesPage,
             "Transactions": TransactionsPage,
             "Reports": ReportsPage,
             "Settings": SettingsPage,

@@ -80,7 +80,24 @@ test that builds every page against the real database.)
 - [x] Contract-note PDF parsing (self-dating; encrypted files via the password vault — see [docs/password-vault.md](docs/password-vault.md))
 - [x] Secure password vault (AES-GCM + OS keystore; once-only password prompt)
 - [x] Cross-source symbol identity (symbol_aliases table, applied at holdings aggregation)
+- [x] F&O symbol normalization across broker sources (calculations/fno.py: every text shape -> `BANKNIFTY 45500 PE 2023-07-27`; spaced / no-space / ISO / IIFL `DD MMM YYYY`, case-insensitive; non-F&O text passes through verbatim)
 - [ ] Real encrypted contract-note PDFs: waiting for the user to enter each note's password once (vault flow is ready and tested)
+
+## Phase 9b: Accounts & Live Pricing ✅
+
+**Goal**: Per-account bookkeeping and market valuation of holdings.
+
+- [x] Schema v3 in-place upgrade: `accounts` table (BROKER|PERSONAL, is_main) seeded with "Main broker" + "Main personal"; `prices` table; nullable `account_id` on transactions and holdings (NULL = Unassigned); idempotent structural detection so an interrupted upgrade re-runs safely
+- [x] Accounts CRUD + account-scoped getters (`get_transactions` / `get_holdings` / `get_portfolio_summary` take an account filter; `UNASSIGNED` sentinel selects account-less rows)
+- [x] Per-account holdings: rebuild_holdings() groups canonicalized transactions by account and values each group from stored prices (market_value = qty x price, profit_loss = market - invested; unpriced symbols stay 0)
+- [x] Price store: set_price() upsert (manual or NSE source) then apply_prices_to_holdings() refreshes the cache in place
+- [x] Account tagging through every importer: `account_id` parameter on all five importers, commit_import(), the Import page dropdown, and the CLI (`--account NAME`, case-insensitive with a clear error for unknown names)
+- [x] Consent-gated NSE fetcher (market_data/nse.py): a consent callable is consulted before EVERY fetch and refusal raises ConsentRequired with zero network traffic; injectable transport so tests never touch the network; symbol mapping (mechanical + overrides; VEDANTA known-delisted) with graceful per-symbol failure reporting
+- [x] Accounts page: list (kind, MAIN badge, transaction count, invested) + add form for more broker/personal accounts + Unassigned bucket row
+- [x] Prices page: one editable row per holding prefilled from the prices table, Save prices, and Fetch from NSE behind a permission dialog asked on every click
+- [x] Dashboard account filter (All accounts / Unassigned / each account) re-rendering KPI cards + top holdings; new Market Value and Profit/Loss cards
+- [x] Live database migrated to v3 (manual file backup taken first); 174 transactions, 5 holdings, aliases intact
+
 ## Phase 10: Data Synchronization & Backups ✅
 
 **Goal**: Local data protection and recovery.

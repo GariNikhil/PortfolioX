@@ -81,7 +81,7 @@ ISIN_PATTERN = re.compile(r"^[A-Za-z]{2}[A-Za-z0-9]{9}[0-9]$")
 GrowwImportError = ImportFileError
 
 
-def import_groww_tradebook(path, skip_duplicates=True):
+def import_groww_tradebook(path, skip_duplicates=True, account_id=None):
     """Import a tradebook file and return an ImportResult.
 
     File-level problems (missing file, wrong columns, no data rows) raise
@@ -104,7 +104,8 @@ def import_groww_tradebook(path, skip_duplicates=True):
         _record_import(filename, message)
         raise GrowwImportError(f"{filename} contains no importable data rows")
 
-    return commit_import(filename, "GROWW_TRADEBOOK", rows, failures, skip_duplicates)
+    return commit_import(filename, "GROWW_TRADEBOOK", rows, failures,
+                         skip_duplicates, account_id)
 
 
 def parse_groww_tradebook(path):

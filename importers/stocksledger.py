@@ -55,7 +55,7 @@ HEADER_MATCH_ALIASES = ("name", "price", "quantity")
 SOURCE_KIND = "STOCKSLEDGER_PORTFOLIO"
 
 
-def import_stocksledger_portfolio(path, skip_duplicates=True):
+def import_stocksledger_portfolio(path, skip_duplicates=True, account_id=None):
     """Import a stocksledger Portfolio sheet and return an ImportResult.
 
     File-level problems (missing file, wrong sheet, no data rows) raise
@@ -78,7 +78,8 @@ def import_stocksledger_portfolio(path, skip_duplicates=True):
         record_import(filename, SOURCE_KIND, f"FAILED ({message})")
         raise ImportFileError(message)
 
-    return commit_import(filename, SOURCE_KIND, rows, failures, skip_duplicates)
+    return commit_import(filename, SOURCE_KIND, rows, failures, skip_duplicates,
+                         account_id)
 
 
 def parse_stocksledger_portfolio(path):

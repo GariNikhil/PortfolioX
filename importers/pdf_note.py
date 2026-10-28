@@ -64,7 +64,7 @@ _TRADE_DATE = re.compile(r"Trade date\s+(\d{1,2}-\d{1,2}-\d{4})")
 _NUMBER = re.compile(r"^-?[\d,]+(?:\.\d+)?$")
 
 
-def import_contract_note_pdf(path, skip_duplicates=True):
+def import_contract_note_pdf(path, skip_duplicates=True, account_id=None):
     """Import one contract-note PDF and return an ImportResult.
 
     File-level problems (missing file, wrong content, no importable rows)
@@ -90,7 +90,8 @@ def import_contract_note_pdf(path, skip_duplicates=True):
         record_import(filename, SOURCE_KIND, f"FAILED ({message})")
         raise ImportFileError(message)
 
-    return commit_import(filename, SOURCE_KIND, rows, failures, skip_duplicates)
+    return commit_import(filename, SOURCE_KIND, rows, failures, skip_duplicates,
+                         account_id)
 
 
 def parse_contract_note_pdf(path):

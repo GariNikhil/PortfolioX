@@ -8,6 +8,7 @@ from pathlib import Path
 
 from database import db, schema
 from database.manager import (
+    UNASSIGNED,
     add_account,
     add_transactions,
     apply_prices_to_holdings,
@@ -172,6 +173,36 @@ class V3LayerTests(unittest.TestCase):
         every = get_portfolio_summary()
         self.assertEqual(every["total_transactions"], 2)
         self.assertEqual(every["total_holdings"], 2)
+
+    def test_unassigned_sentinel_filters_accountless_rows(self):
+        add_transactions(
+            [{
+                "trade_date": "2026-01-05", "symbol": "ITC",
+                "transaction_type": "BUY", "quantity": 5, "price": 400,
+            }],
+        )  # no account
+        broker = find_account_by_name("Main broker")
+        add_transactions(
+            [{
+                "trade_date": "2026-01-06", "symbol": "RELIANCE",
+                "transaction_type": "BUY", "quantity": 1, "price": 2500,
+            }],
+            account_id=broker["id"],
+        )
+        rebuild_holdings()
+
+        self.assertEqual(
+            {row["symbol"] for row in get_transactions(account_id=UNASSIGNED)},
+            {"ITC"},
+        )
+        self.assertEqual(
+            {row["symbol"] for row in get_holdings(account_id=UNASSIGNED)},
+            {"ITC"},
+        )
+        summary = get_portfolio_summary(account_id=UNASSIGNED)
+        self.assertEqual(summary["total_transactions"], 1)
+        self.assertEqual(summary["total_holdings"], 1)
+        self.assertEqual(summary["total_invested"], 2000.0)
 
     def test_prices_roundtrip(self):
         set_price("RELIANCE", 2600.5, source="manual")

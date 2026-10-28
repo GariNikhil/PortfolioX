@@ -56,7 +56,7 @@ MIN_HEADER_MATCHES = 3
 SOURCE_KIND = "CONTRACT_NOTE_ORDERS"
 
 
-def import_contract_note(path, trade_date, skip_duplicates=True):
+def import_contract_note(path, trade_date, skip_duplicates=True, account_id=None):
     """Import one contract-note Orders sheet for a single trade date.
 
     File-level problems (missing file, wrong sheet, no data rows) raise
@@ -79,7 +79,8 @@ def import_contract_note(path, trade_date, skip_duplicates=True):
         record_import(filename, SOURCE_KIND, f"FAILED ({message})")
         raise ImportFileError(message)
 
-    return commit_import(filename, SOURCE_KIND, rows, failures, skip_duplicates)
+    return commit_import(filename, SOURCE_KIND, rows, failures, skip_duplicates,
+                         account_id)
 
 
 def parse_contract_note(path, trade_date):

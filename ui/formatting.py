@@ -37,11 +37,13 @@ def format_quantity(quantity):
 def kpi_cards(summary):
     """Dashboard cards from get_portfolio_summary(): (label, value, note).
 
-    Market value and profit/loss are zero until the pricing phase supplies
-    live prices; the card says so instead of showing a misleading ₹0.00.
+    Market value and P&L come from stored prices; before any price is
+    entered they read zero, and the card says so instead of showing a
+    misleading ₹0.00.
     """
 
     market_value = summary["total_market_value"]
+    profit_loss = summary["total_profit_loss"]
     return [
         ("Total Invested", format_rupees(summary["total_invested"]), "across holdings"),
         ("Holdings", str(summary["total_holdings"]), "open positions"),
@@ -49,6 +51,13 @@ def kpi_cards(summary):
         (
             "Market Value",
             format_rupees(market_value) if market_value else "—",
-            "live prices coming soon",
+            "at stored prices" if market_value else "no prices entered yet",
+        ),
+        (
+            "Profit / Loss",
+            format_rupees(profit_loss) if market_value else "—",
+            "needs market value" if not market_value else (
+                "in profit" if profit_loss >= 0 else "in loss"
+            ),
         ),
     ]

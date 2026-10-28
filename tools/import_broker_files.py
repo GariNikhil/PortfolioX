@@ -156,7 +156,8 @@ def looks_like_contract_note(path):
         return False
 
 
-def import_with_vault(path, derived_candidates=(), ask_passwords=False):
+def import_with_vault(path, derived_candidates=(), ask_passwords=False,
+                      account_id=None):
     """Import one PDF, prompting/deriving the password at most once.
 
     Returns (result_or_None, label, detail). The password, once it works,
@@ -165,7 +166,7 @@ def import_with_vault(path, derived_candidates=(), ask_passwords=False):
     """
 
     try:
-        return import_contract_note_pdf(path), OK, ""
+        return import_contract_note_pdf(path, account_id=account_id), OK, ""
     except PasswordRequiredError:
         pass  # fall through to the one-time prompt
 
@@ -178,7 +179,7 @@ def import_with_vault(path, derived_candidates=(), ask_passwords=False):
             continue
         store_password(PDF_KIND, candidate)
         print(f"    derived password accepted and stored for {path.name}")
-        return import_contract_note_pdf(path), OK, ""
+        return import_contract_note_pdf(path, account_id=account_id), OK, ""
 
     if not ask_passwords:
         return None, NEEDS_PASSWORD, "no stored password (run with --ask-passwords)"
@@ -189,7 +190,7 @@ def import_with_vault(path, derived_candidates=(), ask_passwords=False):
 
     store_password(PDF_KIND, password)
     try:
-        return import_contract_note_pdf(path), OK, ""
+        return import_contract_note_pdf(path, account_id=account_id), OK, ""
     except PasswordRequiredError:
         print(f"    stored password was rejected for {path.name}")
         return None, NEEDS_PASSWORD, "stored password was rejected"
@@ -212,18 +213,19 @@ def prompt_for_password(path):
     return password or None
 
 
-def run_import(action, path, orders_date, ask_passwords=False):
+def run_import(action, path, orders_date, ask_passwords=False, account_id=None):
     """Dispatch one routed file. Returns (result_or_None, label, detail)."""
 
     try:
         if action == "iifl":
-            return import_iifl_trade_listing(path), OK, ""
+            return import_iifl_trade_listing(path, account_id=account_id), OK, ""
         if action == "stocksledger":
-            return import_stocksledger_portfolio(path), OK, ""
+            return import_stocksledger_portfolio(path, account_id=account_id), OK, ""
         if action == "orders":
-            return import_contract_note(path, orders_date), OK, ""
+            return import_contract_note(path, orders_date, account_id=account_id), OK, ""
         if action == "pdf":
-            return import_with_vault(path, ask_passwords=ask_passwords)
+            return import_with_vault(path, ask_passwords=ask_passwords,
+                                     account_id=account_id)
     except ImportFileError as error:
         return None, FAILED, str(error)
     except VaultError as error:
@@ -248,6 +250,10 @@ def main(argv=None):
                         help="prompt (hidden input) for encrypted files that "
                              "have no stored password yet; without this flag "
                              "they are reported and skipped")
+    parser.add_argument("--account",
+                        help="tag every imported row with this account "
+                             "(matched case-insensitively against the "
+                             "accounts table; omit for Unassigned)")
     parser.add_argument("--dry-run", action="store_true",
                         help="only print what would be imported")
     parser.add_argument("--yes", action="store_true",
@@ -265,6 +271,16 @@ def main(argv=None):
             "refusing to write the live data/portfoliox.db without --yes "
             "(use --db for a scratch database, or --dry-run to just plan)"
         )
+
+    account_id = None
+    if args.account:
+        from database.manager import find_account_by_name  # after path/db setup
+        account = find_account_by_name(args.account)
+        if account is None:
+            parser.error(f"no account named '{args.account}' (add one in the "
+                         "Accounts page or check the spelling)")
+        account_id = account["id"]
+        print(f"tagging imports with account: {account['name']}\n")
 
     if not args.dry_run:
         ensure_schema()
@@ -303,7 +319,8 @@ def main(argv=None):
             continue
 
         result, label, detail = run_import(
-            action, path, args.orders_date, ask_passwords=args.ask_passwords
+            action, path, args.orders_date, ask_passwords=args.ask_passwords,
+            account_id=account_id,
         )
         if label == OK:
             totals[OK] += 1

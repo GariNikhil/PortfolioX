@@ -48,8 +48,9 @@ class KpiCardsTests(unittest.TestCase):
         self.assertEqual(cards[0], ("Total Invested", "₹1,23,456.50", "across holdings"))
         self.assertEqual(cards[1], ("Holdings", "5", "open positions"))
         self.assertEqual(cards[2], ("Transactions", "174", "recorded trades"))
-        # No live prices yet: dash, not a fake zero.
-        self.assertEqual(cards[3], ("Market Value", "—", "live prices coming soon"))
+        # No prices entered yet: dash, not a fake zero.
+        self.assertEqual(cards[3], ("Market Value", "—", "no prices entered yet"))
+        self.assertEqual(cards[4], ("Profit / Loss", "—", "needs market value"))
 
     def test_market_value_shown_when_priced(self):
         cards = kpi_cards({
@@ -61,6 +62,9 @@ class KpiCardsTests(unittest.TestCase):
         })
 
         self.assertEqual(cards[3][1], "₹120.50")
+        self.assertEqual(cards[3][2], "at stored prices")
+        self.assertEqual(cards[4][1], "₹20.50")
+        self.assertEqual(cards[4][2], "in profit")
 
 
 if __name__ == "__main__":

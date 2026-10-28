@@ -170,7 +170,8 @@ def _split_oversells(pending):
     return insertable, oversells
 
 
-def commit_import(filename, source_kind, rows, failures, skip_duplicates=True):
+def commit_import(filename, source_kind, rows, failures, skip_duplicates=True,
+                  account_id=None):
     """Shared import-commit flow: dedupe, drop oversells, insert atomically, audit-log.
 
     The caller has already parsed the file (so `rows` are manager-ready
@@ -178,6 +179,7 @@ def commit_import(filename, source_kind, rows, failures, skip_duplicates=True):
     "no importable rows" case. Rows that would oversell current holdings —
     legitimate in real contract notes that sell shares bought elsewhere —
     are converted into row-level failures instead of failing the batch.
+    account_id tags the whole batch with one account (None = Unassigned).
     Returns the ImportResult; raises ImportFileError only if the database
     rejects the batch.
     """
@@ -206,7 +208,7 @@ def commit_import(filename, source_kind, rows, failures, skip_duplicates=True):
         return result
 
     try:
-        manager.add_transactions(pending)
+        manager.add_transactions(pending, account_id=account_id)
         manager.rebuild_holdings()
     except Exception as error:  # batch rejected: keep the audit log truthful
         record_import(filename, source_kind, f"FAILED ({error})")
