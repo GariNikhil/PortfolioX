@@ -1,19 +1,31 @@
 """SQLite schema: creation, versioned upgrades, and money storage.
 
 Amount columns are stored as INTEGER paise (1 rupee = 100 paise) so that
-sums stay exact. ensure_schema() creates the version-2 tables on a fresh
-database and migrates an older rupee-REAL (v1) database in place, preserving
-row values by multiplying stored amounts by 100.
+sums stay exact. ensure_schema() creates the version-3 tables on a fresh
+database, migrates an older rupee-REAL (v1) database in place preserving
+row values by multiplying stored amounts by 100, and upgrades a v2
+database in place with the v3 additions (accounts, prices, account_id).
 """
 
 from database.db import transaction
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
-# v2 table definitions. Money columns are INTEGER paise; quantity stays REAL
+# v3 table definitions. Money columns are INTEGER paise; quantity stays REAL
 # because fractional share counts are legitimate. profit_loss has no
-# non-negative check because losses are negative by design.
+# non-negative check because losses are negative by design. Holdings are
+# per account: one row per (account, symbol) pair. account_id is nullable
+# so pre-v3 transactions/holdings stay valid as "Unassigned".
 _TABLES = {
+    "accounts": """
+    CREATE TABLE accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        kind TEXT NOT NULL CHECK (kind IN ('BROKER', 'PERSONAL')),
+        is_main INTEGER NOT NULL DEFAULT 0 CHECK (is_main IN (0, 1)),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
     "transactions": """
     CREATE TABLE transactions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -27,18 +39,21 @@ _TABLES = {
         brokerage INTEGER NOT NULL DEFAULT 0 CHECK (brokerage >= 0),
         taxes INTEGER NOT NULL DEFAULT 0 CHECK (taxes >= 0),
         net_amount INTEGER NOT NULL DEFAULT 0,
+        account_id INTEGER REFERENCES accounts(id),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
     "holdings": """
     CREATE TABLE holdings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        symbol TEXT UNIQUE NOT NULL,
+        account_id INTEGER REFERENCES accounts(id),
+        symbol TEXT NOT NULL,
         quantity REAL NOT NULL DEFAULT 0,
         average_price INTEGER NOT NULL DEFAULT 0 CHECK (average_price >= 0),
         invested_amount INTEGER NOT NULL DEFAULT 0 CHECK (invested_amount >= 0),
         market_value INTEGER NOT NULL DEFAULT 0 CHECK (market_value >= 0),
-        profit_loss INTEGER NOT NULL DEFAULT 0
+        profit_loss INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (account_id, symbol)
     )
     """,
     "dividends": """
@@ -65,7 +80,22 @@ _TABLES = {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
+    "prices": """
+    CREATE TABLE prices (
+        symbol TEXT PRIMARY KEY,
+        price INTEGER NOT NULL CHECK (price >= 0),
+        source TEXT NOT NULL DEFAULT 'manual',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
 }
+
+# Accounts seeded on first v3 creation. The user's model: a main broker
+# account, a main personal account, and the option to add more of either.
+_SEED_ACCOUNTS = (
+    ("Main broker", "BROKER", 1),
+    ("Main personal", "PERSONAL", 1),
+)
 
 # Money columns multiplied by 100 during the v1 -> v2 migration, keyed by
 # table. Columns not listed here are carried over unchanged.
@@ -77,12 +107,14 @@ _MIGRATION_MULTIPLIES = {
 
 
 def ensure_schema():
-    """Create tables when missing and migrate a v1 database to v2.
+    """Create tables when missing and migrate older databases in place.
 
     Fresh database: all tables are created and user_version is set to
     SCHEMA_VERSION. Existing database: each TRANSACTIONS-style table that
-    still stores money as REAL is moved aside, recreated with v2 columns,
-    back-filled with amounts multiplied by 100, and the old table dropped.
+    still stores money as REAL is moved aside, recreated with current
+    columns, back-filled with amounts multiplied by 100, and the old table
+    dropped (v1 path). A v2 database gets the v3 additions in place
+    (accounts and prices tables, account_id columns, seeded accounts).
     A migration that hits constraint violations (bad money data) fails
     loudly instead of silently altering values.
     """
@@ -107,7 +139,47 @@ def ensure_schema():
         if migration_needed:
             _migrate_v1_tables(connection)
 
+        _upgrade_to_v3(connection)
+
         connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+
+def _upgrade_to_v3(connection):
+    """Add the v3 structures to an existing v2 database, idempotently.
+
+    Structural detection (missing tables/columns) rather than user_version
+    alone, so an interrupted upgrade can safely re-run.
+    """
+
+    existing = {
+        row[0]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        )
+    }
+
+    if "accounts" not in existing:
+        connection.execute(_TABLES["accounts"])
+    if "prices" not in existing:
+        connection.execute(_TABLES["prices"])
+
+    for table in ("transactions", "holdings"):
+        columns = {
+            row["name"]
+            for row in connection.execute(f"PRAGMA table_info({table})")
+        }
+        if "account_id" not in columns:
+            connection.execute(
+                f"ALTER TABLE {table} ADD COLUMN account_id "
+                "INTEGER REFERENCES accounts(id)"
+            )
+
+    seeded = connection.execute("SELECT COUNT(*) FROM accounts").fetchone()[0]
+    if not seeded:
+        connection.executemany(
+            "INSERT INTO accounts (name, kind, is_main) VALUES (?, ?, ?)",
+            _SEED_ACCOUNTS,
+        )
 
 
 def _is_v1(connection, table):
