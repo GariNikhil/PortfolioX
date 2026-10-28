@@ -8,6 +8,7 @@ rebuild_holdings() recomputes it from transactions so it cannot drift.
 """
 
 from database.db import create_connection, execute_query, fetch_all, transaction
+from calculations.fno import canonical_symbol
 from calculations.holdings import calculate_holdings
 
 PAISE_PER_RUPEE = 100
@@ -338,19 +339,25 @@ def _is_canonical_value(symbol):
 
 
 def _canonicalized_transactions():
-    """Transactions with symbols mapped through the alias table.
+    """Transactions with symbols normalized and mapped through aliases.
 
-    Returns plain dicts (sqlite3.Row is immutable) only when at least one
-    alias exists, so the no-alias path stays allocation-free.
+    F&O text is first brought to one canonical shape (calculations.fno),
+    then the alias table maps verbatim equity variants. Returns plain
+    dicts (sqlite3.Row is immutable) only when at least one alias exists,
+    so the no-alias path stays allocation-free.
     """
 
     aliases = {row["alias"]: row["canonical"] for row in get_symbol_aliases()}
     if not aliases:
-        return get_transactions()
+        return [
+            {**row, "symbol": canonical_symbol(row["symbol"])}
+            for row in get_transactions()
+        ]
 
     canonicalized = []
     for row in get_transactions():
         item = dict(row)
+        item["symbol"] = canonical_symbol(item["symbol"])
         mapped = aliases.get(str(item["symbol"]).upper())
         if mapped:
             item["symbol"] = mapped
