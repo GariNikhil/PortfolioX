@@ -50,12 +50,12 @@ snapshot — see [docs/contract-note-import.md](docs/contract-note-import.md).
 (Reports page stays a placeholder until Phase 6; the dashboard chart
 placeholder awaits the live-pricing phase. Verified with a headless smoke
 test that builds every page against the real database.)
-## Phase 6: Export & Reporting 🔵
+## Phase 6: Export & Reporting ✅
 
 **Goal**: Generate reports and exports from portfolio data.
 
-- [ ] Generate text/CSV reports of holdings and transactions
-- [ ] Import page for Groww tradebook upload
+- [x] Generate text/CSV reports of holdings and transactions (reports/writer.py + tools/export_reports.py CLI + Reports page save dialogs)
+- [x] Import page for Groww tradebook upload (built in Phase 5 with all five importers)
 ## Phase 7: Packaging & Deployment 🔵
 
 **Goal**: Prepare the application for distribution.
@@ -123,7 +123,7 @@ test that builds every page against the real database.)
 - Holdings are calculated correctly from imported data
 - PRD.md and Tasks.md documents are complete
 | 5 | ✅ | CustomTkinter UI |
-| 6 | 🔵 | Export & Reporting |
+| 6 | ✅ | Export & Reporting |
 | 7 | 🔵 | Packaging & Deployment |
 | 8 | 🔵 | Advanced Calculations |
 | 9 | 🔵 | Multi-Broker Support |
