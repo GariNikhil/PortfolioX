@@ -253,13 +253,24 @@ schema v2) merges them **at holdings-aggregation time only**:
   passwords are stored in the vault and all `CONTRACT NOTE 1234567890*.pdf`
   notes import. The 06-2022 `trade_details_*.pdf` pair is deliberately
   skipped (see above).
-- **Multi-day Orders workbooks cannot be dated from their contents** (29
-  non-chronological, mixed-source blocks; one hard anchor: block 18 =
-  2023-07-27 via trade-number match with 28.pdf). The path forward is to
-  date Orders blocks by matching (order no, trade no) against the now-
-  imported PDF trades, and import only the blocks whose trades the notes
-  do not already cover (e.g. the VEDANTA sell-13 and the COAL INDIA
-  2 @ 235.25 buy exist only in the workbook).
+- **~~Multi-day Orders workbooks cannot be dated from their contents.~~
+  Resolved (Oct 2026):** all 37 real blocks of the `inter (1).xlsx` Orders
+  sheet are now dated by matching (order no, trade no) pairs against the
+  PDF-derived trade-number map — 34 blocks matched a single note date
+  directly (zero mixed blocks); the 3 remaining blocks (15 F&O trades,
+  BANKNIFTY/FINNIFTY 11-Jul expiries) exist in no PDF note and were dated
+  **2023-07-11** by settlement elimination (P&L settlement 2023126 is the
+  only one between 07-06 and 07-13; the FINNIFTY 11-Jul expiry confirms).
+  The match also exposed that notes `1.pdf` (2023-08-01) and `2.pdf`
+  (2023-08-02) had never been imported — their 5 trades (RELIANCE POWER
+  sell-35, VEDANTA sell-13 @ 276.60, COAL INDIA buy-2 @ 235.25, NIFTY
+  19300 PE roundtrip) went in together with the 15 workbook-only trades
+  (user-approved live import, Oct 2026): 321 transactions, RELIANCE POWER
+  position closed, VEDANTA 17→4, COAL INDIA 1→3.
+- **06-2022 `AAAAA0000A_20220627.pdf` rejects the stored vault password**
+  (decrypt returns 0). The 2022 trades are already in the database via the
+  hand-entered snapshot, so the note is skipped until the correct password
+  is provided.
 - The UI import page (Phase 6) will surface `ImportResult.summary()` and
   the failure list; the audit trail already distinguishes import kinds:
   `GROWW_TRADEBOOK`, `CONTRACT_NOTE_ORDERS`, `IIFL_TRADE_LISTING`,
