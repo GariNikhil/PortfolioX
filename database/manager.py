@@ -277,6 +277,10 @@ def rebuild_holdings():
 
     Stored market prices (the prices table) fill market_value and
     profit_loss; symbols without a stored price keep them at zero.
+
+    Hand-entered positions (manual_holdings) are merged in afterwards:
+    their quantity adds to any transaction-derived position for the same
+    (account, symbol), and unmatched manual symbols become new rows.
     """
 
     groups = {}
@@ -285,7 +289,6 @@ def rebuild_holdings():
 
     priced = get_prices_paise()
 
-    rows_to_insert = []
     rebuilt = []
     for account_id, group in groups.items():
         for holding in calculate_holdings(group):
@@ -306,7 +309,9 @@ def rebuild_holdings():
                 profit_loss=profit_loss,
             )
             rebuilt.append(row)
-            rows_to_insert.append(tuple(row))
+
+    rebuilt = _merge_manual_holdings(rebuilt, priced)
+    rows_to_insert = [tuple(row) for row in rebuilt]
 
     with transaction() as connection:
         connection.execute("DELETE FROM holdings")
@@ -400,17 +405,23 @@ def add_account(name, kind):
 
 
 def get_accounts():
-    """All accounts with their transaction counts, mains first."""
+    """All accounts with transaction counts and balance, mains first.
 
-    return fetch_all(
-        """
-        SELECT accounts.*,
-               (SELECT COUNT(*) FROM transactions t
-                WHERE t.account_id = accounts.id) AS transaction_count
-        FROM accounts
-        ORDER BY accounts.is_main DESC, accounts.name ASC
-        """
-    )
+    current_balance is converted to rupees; everything else is raw.
+    """
+
+    return [
+        _to_rupees(row, ("current_balance",))
+        for row in fetch_all(
+            """
+            SELECT accounts.*,
+                   (SELECT COUNT(*) FROM transactions t
+                    WHERE t.account_id = accounts.id) AS transaction_count
+            FROM accounts
+            ORDER BY accounts.is_main DESC, accounts.name ASC
+            """
+        )
+    ]
 
 
 def find_account_by_name(name):
@@ -421,6 +432,169 @@ def find_account_by_name(name):
         (str(name or "").strip(),),
     )
     return rows[0] if rows else None
+
+
+def find_account_by_id(account_id):
+    """Account row by id, or None."""
+
+    rows = fetch_all(
+        "SELECT * FROM accounts WHERE id = ? LIMIT 1",
+        (account_id,),
+    )
+    return rows[0] if rows else None
+
+
+def set_account_balance(account_id, rupees):
+    """Set an account's user-entered current balance; True when it exists.
+
+    The balance is a hand-entered figure (what the broker statement says),
+    independent of the derived invested amounts, so negative values are
+    allowed. Money is stored as INTEGER paise.
+    """
+
+    amount_paise = _to_paise(rupees)
+    with transaction() as connection:
+        cursor = connection.execute(
+            "UPDATE accounts SET current_balance = ? WHERE id = ?",
+            (amount_paise, account_id),
+        )
+    return cursor.rowcount > 0
+
+
+# --------------------------------------------------------- manual holdings #
+
+
+def add_manual_holding(account_id, symbol, quantity, average_price):
+    """Record a hand-entered holding (rupee average price).
+
+    Manual rows live in their own table and are merged into the holdings
+    cache by rebuild_holdings(), so they survive cache rebuilds. Re-adding
+    the same (account, symbol) replaces the earlier entry.
+    """
+
+    symbol = str(symbol or "").strip().upper()
+    if not symbol:
+        raise ValueError("symbol must not be empty")
+
+    quantity = float(quantity or 0)
+    if not quantity > 0:
+        raise ValueError("quantity must be greater than zero")
+
+    average_price = float(average_price or 0)
+    if average_price < 0:
+        raise ValueError("average price cannot be negative")
+
+    if find_account_by_id(account_id) is None:
+        raise ValueError(f"account id {account_id} does not exist")
+
+    with transaction() as connection:
+        connection.execute(
+            """
+            INSERT INTO manual_holdings (account_id, symbol, quantity, average_price)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(account_id, symbol) DO UPDATE SET
+                quantity = excluded.quantity,
+                average_price = excluded.average_price
+            """,
+            (account_id, symbol, quantity, _to_paise(average_price)),
+        )
+
+
+def get_manual_holdings(account_id=None):
+    """Manual holdings rows, symbols ascending, money in rupees, with account.
+
+    account_id filters to one account (UNASSIGNED matches nothing, since
+    manual rows always belong to an account); None means every account.
+    """
+
+    fragment, params = _account_filter(account_id, "manual_holdings.account_id")
+    query = f"""
+    SELECT manual_holdings.*, accounts.name AS account_name
+    FROM manual_holdings
+    LEFT JOIN accounts ON accounts.id = manual_holdings.account_id
+    {fragment}
+    """
+    query += " ORDER BY manual_holdings.symbol ASC"
+
+    return [
+        _to_rupees(row, ("average_price",))
+        for row in fetch_all(query, params)
+    ]
+
+
+def delete_manual_holding(manual_id):
+    """Delete one manual holding row; True when a row was removed."""
+
+    with transaction() as connection:
+        cursor = connection.execute(
+            "DELETE FROM manual_holdings WHERE id = ?",
+            (manual_id,),
+        )
+    return cursor.rowcount > 0
+
+
+def _merge_manual_holdings(rebuilt, priced):
+    """Fold manual_holdings rows into the rebuilt cache; returns the merge.
+
+    Manual quantity adds to any transaction-derived position for the same
+    (account, canonical symbol): invested grows by quantity x average and
+    the average price recomputes weighted. Manual symbols with no
+    transaction history become new rows. Manual symbols are canonicalized
+    like transaction symbols; the manual_holdings table keeps its verbatim
+    symbol.
+    """
+
+    by_key = {(row.account_id, row.symbol): row for row in rebuilt}
+
+    for manual in fetch_all(
+        "SELECT account_id, symbol, quantity, average_price FROM manual_holdings"
+    ):
+        symbol = canonical_symbol(manual["symbol"])
+        key = (manual["account_id"], symbol)
+        quantity = manual["quantity"]
+        invested_paise = int(round(quantity * manual["average_price"]))
+
+        price_paise = priced.get(symbol.upper())
+        if price_paise is None:
+            market_value = 0
+            profit_loss = 0
+        else:
+            market_value = int(round(quantity * price_paise))
+            profit_loss = market_value - invested_paise
+
+        existing = by_key.get(key)
+        if existing is None:
+            by_key[key] = RebuiltHolding(
+                account_id=manual["account_id"],
+                symbol=symbol,
+                quantity=quantity,
+                average_price=manual["average_price"],
+                invested_amount=invested_paise,
+                market_value=market_value,
+                profit_loss=profit_loss,
+            )
+            continue
+
+        total_quantity = existing.quantity + quantity
+        total_invested = existing.invested_amount + invested_paise
+        if price_paise is None:
+            market_value = 0
+            profit_loss = 0
+        else:
+            market_value = int(round(total_quantity * price_paise))
+            profit_loss = market_value - total_invested
+
+        by_key[key] = RebuiltHolding(
+            account_id=existing.account_id,
+            symbol=existing.symbol,
+            quantity=total_quantity,
+            average_price=int(round(total_invested / total_quantity)),
+            invested_amount=total_invested,
+            market_value=market_value,
+            profit_loss=profit_loss,
+        )
+
+    return list(by_key.values())
 
 
 # ------------------------------------------------------------------ prices #
