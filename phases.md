@@ -70,8 +70,10 @@ snapshot — see [docs/contract-note-import.md](docs/contract-note-import.md).
 - [x] Support IIFL Trade Listing .xls import (dated rows, buy+sell sides per instrument)
 - [x] Support stocksledger Portfolio snapshot import (hand-entered holdings imported as BUYs)
 - [x] Create import result reporting (successes, failures, warnings) via ImportResult
-- [ ] Contract-note PDF parsing (encrypted files pending the password-locker decision)
-- [ ] Cross-source symbol identity (e.g. VEDANTA vs VEDANTA LIMITED from different files)
+- [x] Contract-note PDF parsing (self-dating; encrypted files via the password vault — see [docs/password-vault.md](docs/password-vault.md))
+- [x] Secure password vault (AES-GCM + OS keystore; once-only password prompt)
+- [x] Cross-source symbol identity (symbol_aliases table, applied at holdings aggregation)
+- [ ] Real encrypted contract-note PDFs: waiting for the user to enter each note's password once (vault flow is ready and tested)
 ## Phase 10: Data Synchronization & Backups 🔵
 
 **Goal**: Local data protection and recovery.

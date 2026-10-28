@@ -7,7 +7,7 @@ credits quantity*price minus charges. The holdings table is a derived cache;
 rebuild_holdings() recomputes it from transactions so it cannot drift.
 """
 
-from database.db import create_connection, fetch_all, transaction
+from database.db import create_connection, execute_query, fetch_all, transaction
 from calculations.holdings import calculate_holdings
 
 PAISE_PER_RUPEE = 100
@@ -220,9 +220,15 @@ def rebuild_holdings():
     calculate_holdings(), so fully sold symbols disappear too. market_value
     and profit_loss reset to zero because they need market prices, which are
     restored when the pricing phase lands. Money is stored in paise.
+
+    Transaction symbols are canonicalized through the symbol_aliases table
+    before aggregation, so the same company imported under different
+    verbatim names (e.g. VEDANTA and VEDANTA LIMITED from different
+    sources) forms one holding. The transactions table keeps its verbatim
+    symbols; aliases affect only aggregation.
     """
 
-    holdings = calculate_holdings(get_transactions())
+    holdings = calculate_holdings(_canonicalized_transactions())
 
     with transaction() as connection:
         connection.execute("DELETE FROM holdings")
@@ -254,6 +260,102 @@ def get_holdings():
         _to_rupees(row, HOLDING_MONEY_COLUMNS)
         for row in fetch_all("SELECT * FROM holdings ORDER BY symbol ASC")
     ]
+
+
+def get_symbol_aliases():
+    """All alias -> canonical mappings, aliases ascending."""
+
+    return fetch_all("SELECT alias, canonical FROM symbol_aliases ORDER BY alias")
+
+
+def set_symbol_alias(alias, canonical):
+    """Map one verbatim symbol variant onto its canonical holding symbol.
+
+    Aliases are single-level, which rules out chains and cycles by
+    construction: the alias key may not already be in use as a canonical
+    target, and the canonical target may not itself be an alias key. Both
+    names are normalized to upper case like every stored symbol.
+    """
+
+    alias_value = str(alias or "").strip().upper()
+    canonical_value = str(canonical or "").strip().upper()
+    if not alias_value or not canonical_value:
+        raise ValueError("alias and canonical symbol must not be empty")
+    if alias_value == canonical_value:
+        raise ValueError(
+            f"alias '{alias_value}' cannot map to itself"
+        )
+    if _is_canonical_value(alias_value):
+        raise ValueError(
+            f"'{alias_value}' is already a canonical target of another "
+            "alias; mapping it again would create a chain (no chains)"
+        )
+    if _is_alias(canonical_value):
+        raise ValueError(
+            f"canonical '{canonical_value}' is itself an alias; "
+            "aliases must map directly to a final symbol (no chains)"
+        )
+
+    execute_query(
+        """
+        INSERT INTO symbol_aliases (alias, canonical) VALUES (?, ?)
+        ON CONFLICT(alias) DO UPDATE SET canonical = excluded.canonical
+        """,
+        (alias_value, canonical_value),
+    )
+
+
+def delete_symbol_alias(alias):
+    """Remove one alias mapping."""
+
+    execute_query("DELETE FROM symbol_aliases WHERE alias = ?", (
+        str(alias or "").strip().upper(),
+    ))
+
+
+def canonical_symbol(symbol):
+    """The canonical name for a symbol (alias table lookup, else unchanged)."""
+
+    row = fetch_all(
+        "SELECT canonical FROM symbol_aliases WHERE alias = ?",
+        (str(symbol or "").strip().upper(),),
+    )
+    return row[0]["canonical"] if row else str(symbol or "").strip().upper()
+
+
+def _is_alias(symbol):
+    return bool(fetch_all(
+        "SELECT 1 FROM symbol_aliases WHERE alias = ? LIMIT 1",
+        (str(symbol).strip().upper(),),
+    ))
+
+
+def _is_canonical_value(symbol):
+    return bool(fetch_all(
+        "SELECT 1 FROM symbol_aliases WHERE canonical = ? LIMIT 1",
+        (str(symbol).strip().upper(),),
+    ))
+
+
+def _canonicalized_transactions():
+    """Transactions with symbols mapped through the alias table.
+
+    Returns plain dicts (sqlite3.Row is immutable) only when at least one
+    alias exists, so the no-alias path stays allocation-free.
+    """
+
+    aliases = {row["alias"]: row["canonical"] for row in get_symbol_aliases()}
+    if not aliases:
+        return get_transactions()
+
+    canonicalized = []
+    for row in get_transactions():
+        item = dict(row)
+        mapped = aliases.get(str(item["symbol"]).upper())
+        if mapped:
+            item["symbol"] = mapped
+        canonicalized.append(item)
+    return canonicalized
 
 
 def add_dividend(symbol, dividend_date, amount):

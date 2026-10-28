@@ -10,6 +10,15 @@ openpyxl==3.1.5
 # Real broker file import: IIFL Trade Listing .xls (legacy OLE2 format)
 xlrd==2.0.2
 
+# Contract-note PDF import (reading + encrypted-file decrypt in tests)
+pypdf==6.21.3
+
+# Password vault: OS credential store access (Windows Credential Manager)
+keyring==25.7.0
+
+# Password vault: AES-GCM encryption of stored passwords
+cryptography==50.0.0
+
 # Planned for later phases (uncomment when adopted):
-# pdfplumber   (contract-note PDF parsing)
+# pdfplumber   (richer PDF table extraction, if needed later)
 # matplotlib   (charts)

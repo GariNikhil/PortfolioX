@@ -102,20 +102,71 @@ derived columns, repeated header blocks).
 Result on the real file (scratch DB): **4 imported, 3 template-debris
 failures**.
 
+## `importers/pdf_note.py` — Contract-note PDFs
+
+Source inspected: the **unencrypted** samples
+`referance/stock/CONTRACT NOTE/07-2023/28.pdf` and `31.pdf` (8 pages each).
+The PDFs carry the **same Orders layout** as the xlsx — order no, order
+time, trade no, trade time, Security/Contract description, exchange, B/S,
+quantity, rate, optional middle columns, Net Total — extracted as text.
+
+- **Self-dating**: each note carries its own `Trade date DD-MM-YYYY` header
+  line, so unlike the Orders xlsx no caller-supplied date is needed.
+- **Trade-line matching**: rows must start with a 10–16 digit order number,
+  two times, a trade number and a second time; page headers, per-instrument
+  `Total` rows and `Net Total` lines never match and are skipped.
+- **Brokerage from money, not columns**: the optional middle columns
+  (brokerage / net rate / closing rate) are ambiguous in extracted text, so
+  charges = |Net Total| − quantity×rate. This keeps the stored row exactly
+  consistent with the note's own Net Total (0 for the common no-charges
+  rows) and cannot misread `25010.00` as a per-unit rate.
+- **SELL quantities arrive negative** in the text; the stored magnitude is
+  positive with the side carrying the direction (same as the xlsx).
+- Requires `pypdf` (in requirements.txt; `pdfplumber` stays commented out).
+
+Result on the real unencrypted sample (scratch DB): all trade rows of
+`28.pdf` parse and import through the standard `commit_import()` path.
+
+### Encrypted notes and the password vault
+
+The real archive (`CONTRACT NOTE 1234567890*.pdf`, the 06-2022 pair) is
+password-protected. `parse_contract_note_pdf()` resolves the password via
+`security/vault.password_for(path, "CONTRACT_NOTE_PDF")`:
+
+- no stored password → `PasswordRequiredError` (the once-only prompt; not
+  an audit failure),
+- stored password → decrypt and parse automatically,
+- rejected password → `PasswordRequiredError` naming the file.
+
+See [docs/password-vault.md](password-vault.md) for the vault design.
+
+## `database/manager.py` — Cross-source symbol identity
+
+The same company arrives under different verbatim names (`VEDANTA` from the
+hand-entered snapshot vs `VEDANTA LIMITED` from IIFL; `COAL INDIA LTD.` vs
+`COAL INDIA LTD`). A `symbol_aliases` table (alias → canonical, additive to
+schema v2) merges them **at holdings-aggregation time only**:
+
+- `rebuild_holdings()` canonicalizes transaction symbols through the alias
+  table before `calculate_holdings()`; the `transactions` table keeps the
+  verbatim symbols, so provenance is never lost.
+- Aliases are single-level by construction: an alias key may not already be
+  a canonical target, and a canonical target may not itself be an alias
+  key — chains and cycles are rejected with `ValueError` at write time.
+- Re-pointing an alias takes effect on the next rebuild; deleting one
+  splits the holding again on the next rebuild.
+
 ## Known limitations / follow-ups
 
-- **Contract-note PDFs are encrypted.** All `CONTRACT NOTE 1234567890*.pdf`
-  and the 06-2022 trade-detail PDFs are password-protected; parsing is
-  blocked pending the user's password / password-locker decision
-  (`pdfplumber` is intentionally not yet in requirements.txt).
-- **Cross-source symbol identity.** The same company appears under
-  different verbatim symbols from different sources (`VEDANTA` vs
-  `VEDANTA LIMITED`, `PUNJ. NATIONLBAK` vs `PUNJAB NATIONAL BANK`), so they
-  form separate holdings. A symbol-mapping step is future work (Phase 9+).
+- **Real encrypted PDFs still locked.** The vault flow is built and tested,
+  but the actual passwords for `CONTRACT NOTE 1234567890*.pdf` and the
+  06-2022 pair must be entered once by the user (or discovered from broker
+  conventions such as PAN case variants); until then those files cannot be
+  imported.
 - **Multi-day Orders workbooks** need to be split into per-date files (one
   `trade_date` per import) until the day boundaries can be established from
   broker metadata.
 - The UI import page (Phase 6) will surface `ImportResult.summary()` and
   the failure list; the audit trail already distinguishes import kinds:
   `GROWW_TRADEBOOK`, `CONTRACT_NOTE_ORDERS`, `IIFL_TRADE_LISTING`,
-  `STOCKSLEDGER_PORTFOLIO`.
+  `STOCKSLEDGER_PORTFOLIO`, `CONTRACT_NOTE_PDF`.

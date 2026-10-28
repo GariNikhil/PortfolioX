@@ -58,6 +58,13 @@ _TABLES = {
         status TEXT
     )
     """,
+    "symbol_aliases": """
+    CREATE TABLE symbol_aliases (
+        alias TEXT PRIMARY KEY,
+        canonical TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
 }
 
 # Money columns multiplied by 100 during the v1 -> v2 migration, keyed by
