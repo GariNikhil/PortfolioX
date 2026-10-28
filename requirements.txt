@@ -1,0 +1,11 @@
+# PortfolioX application dependencies
+# Install with:  .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+# GUI framework
+customtkinter==6.0.0
+
+# Planned for the import / reports phases (uncomment when adopted):
+# openpyxl
+# pandas
+# pdfplumber
+# matplotlib
