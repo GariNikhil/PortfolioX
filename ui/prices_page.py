@@ -4,9 +4,11 @@ Internet rule: every network fetch asks for permission with a dialog
 EVERY time it runs; declining does zero network activity (the fetchers
 enforce this too - the dialog is only the first of two gates).
 
-The "Fetch prices" button tries NSE first. Whatever NSE could not fetch
-(mutual-fund schemes excluded - they are not exchange-listed) gets a
-second, separate consent dialog and a retry against Yahoo Finance.
+The "Fetch prices" button runs three consented stages:
+1. NSE for the exchange-listed holdings.
+2. Yahoo Finance for whatever NSE could not fetch.
+3. mfapi.in (AMFI's official NAV data) for the mutual-fund schemes,
+   which no exchange lists.
 """
 
 import tkinter.messagebox
@@ -14,6 +16,7 @@ import tkinter.messagebox
 import customtkinter as ctk
 
 from database.manager import get_holdings, get_prices, set_price
+from market_data.mfapi import MfapiFetchError, fetch_mf_navs
 from market_data.nse import ConsentRequired, fetch_nse_prices
 from market_data.yahoo import YahooFetchError, fetch_yahoo_prices
 from ui.formatting import format_quantity, format_rupees
@@ -182,11 +185,14 @@ class PricesPage(ctk.CTkFrame):
         self._flash("\n".join(lines))
 
     def fetch_from_nse(self):
-        """Ask permission EVERY time, then fetch quotes for all holdings.
+        """Ask permission EVERY time, then fetch prices for all holdings.
 
-        NSE first; whatever it could not fetch (excluding mutual-fund
-        schemes, which are never listed) gets a second, separate consent
-        dialog and a retry against Yahoo Finance.
+        Three consented stages, each with its own dialog:
+        1. NSE for the exchange-listed holdings.
+        2. Yahoo Finance for whatever NSE could not fetch (mutual-fund
+           schemes excluded - they are not exchange-listed).
+        3. mfapi.in (AMFI's official NAV data) for the mutual-fund
+           schemes.
         """
 
         symbols = sorted(self._entries)
@@ -214,13 +220,16 @@ class PricesPage(ctk.CTkFrame):
             self._flash(f"Fetch failed: {error}", error=True)
             return
 
-        source = "NSE"
         failures = dict(result["failures"])
+        sources = []
+        fetched_count = len(result["prices"])
+        if result["prices"]:
+            sources.append("NSE")
 
         # ---- Yahoo fallback: one more consent, then retry the misses ---- #
         # Mutual-fund schemes are never listed on an exchange; their
-        # failure is the expected, friendly kind and must not trigger
-        # a pointless second fetch.
+        # failure is the expected, friendly kind and is retried in
+        # stage 3 instead.
         retry = [
             symbol for symbol, reason in result["failures"].items()
             if not reason.startswith("mutual fund")
@@ -245,10 +254,47 @@ class PricesPage(ctk.CTkFrame):
 
                 for symbol, price in yahoo_result["prices"].items():
                     set_price(symbol, price, source="Yahoo")
-                source = "NSE + Yahoo"
+                fetched_count += len(yahoo_result["prices"])
+                if yahoo_result["prices"]:
+                    sources.append("Yahoo")
                 for symbol, reason in yahoo_result["failures"].items():
                     failures[symbol] = reason
                 for symbol in yahoo_result["prices"]:
+                    failures.pop(symbol, None)
+
+        # ---- mfapi.in stage: NAVs for the mutual-fund schemes ---- #
+        mf_schemes = [
+            symbol for symbol, reason in failures.items()
+            if reason.startswith("mutual fund")
+        ]
+        if mf_schemes:
+            mf_granted = tkinter.messagebox.askyesno(
+                "Internet permission required",
+                f"{len(mf_schemes)} mutual-fund scheme(s) have no exchange "
+                "quote.\n\n"
+                "PortfolioX can fetch their NAV from mfapi.in (a free "
+                "mirror of AMFI's official NAV data) - one more internet "
+                "request set.\n\n"
+                "Fetch mutual-fund NAVs now?",
+            )
+            if mf_granted:
+                try:
+                    mf_result = fetch_mf_navs(mf_schemes, lambda: True)
+                except MfapiFetchError as error:
+                    self._flash(f"mfapi fetch refused: {error}", error=True)
+                    return
+                except Exception as error:
+                    self._flash(f"mfapi fetch failed: {error}", error=True)
+                    return
+
+                for symbol, nav in mf_result["prices"].items():
+                    set_price(symbol, nav, source="AMFI")
+                fetched_count += len(mf_result["prices"])
+                if mf_result["prices"]:
+                    sources.append("AMFI NAV")
+                for symbol, reason in mf_result["failures"].items():
+                    failures[symbol] = reason
+                for symbol in mf_result["prices"]:
                     failures.pop(symbol, None)
 
         for symbol, price in result["prices"].items():
@@ -256,7 +302,8 @@ class PricesPage(ctk.CTkFrame):
 
         self._build_rows()
 
-        lines = [f"Fetched {len(result['prices'])} price(s) from {source}."]
+        source_text = " + ".join(sources) if sources else "no source"
+        lines = [f"Fetched {fetched_count} price(s) from {source_text}."]
         if failures:
             lines.append("Not fetched:")
             lines.extend(
