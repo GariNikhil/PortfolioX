@@ -16,7 +16,6 @@ transaction. Both are converted to INTEGER paise by the manager.
 from pathlib import Path
 
 from importers.common import ImportFileError, ImportResult, record_import
-from importers.common import detect_account_from_details
 from database import manager
 
 try:
@@ -85,6 +84,27 @@ def read_pdf_pages(path, password_kind):
     return pages
 
 
+def detect_bank_account(details):
+    """Match a bank statement's details against stored accounts.
+
+    ONLY the account number is matched. Unlike broker files (where UCC
+    and PAN identify the account), a PAN is shared by every account of
+    the same person - matching a bank statement on PAN would silently
+    file one person's bank transactions under whichever broker account
+    happens to carry that PAN. The account number is the identity that
+    is unique to the bank account.
+    """
+
+    account_number = (details or {}).get("account_number")
+    if not account_number:
+        return None
+    for account in manager.get_accounts():
+        stored = (account["account_number"] or "").strip()
+        if stored and stored.upper() == str(account_number).upper():
+            return account
+    return None
+
+
 def import_bank_statement(*, filename, source_kind, rows, failures,
                           details, closing_balance, account_id, bank_name):
     """Shared import flow for one parsed bank statement.
@@ -114,7 +134,7 @@ def import_bank_statement(*, filename, source_kind, rows, failures,
             record_import(filename, source_kind, f"FAILED ({message})")
             raise ImportFileError(message)
     if account is None:
-        account = detect_account_from_details(details)
+        account = detect_bank_account(details)
     if account is None:
         # First import of this bank: create its account. Re-imports
         # detect it instead, via the account number filled below.

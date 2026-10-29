@@ -171,16 +171,18 @@ class ImportPage(ctk.CTkFrame):
         outright; 'Unassigned' maps to None. Returns (account_id, note)
         where note explains an auto-detection for the result box, or
         (None, error) when auto-detection failed - unless
-        allow_unresolved (bank-statement importers auto-create their
-        account in that case, so None is handed to them untouched).
+        allow_unresolved (bank-statement importers): then AUTO_DETECT
+        hands None to the importer untouched, because bank statements
+        are detected by ACCOUNT NUMBER inside the import flow - never
+        by PAN, which every account of the same person shares.
         """
 
         choice = self.account_menu.get()
         if choice == AUTO_DETECT:
+            if allow_unresolved:
+                return None, None
             account = detect_account(self.file_path)
             if account is None:
-                if allow_unresolved:
-                    return None, None
                 return None, (
                     "Could not identify the account from the file "
                     "(no matching UCC / PAN / a/c no). Pick an account "

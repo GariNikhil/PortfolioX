@@ -10,6 +10,7 @@ from database.manager import (
     find_account_by_name,
     get_accounts,
     get_bank_transactions,
+    update_account_details,
 )
 from database.schema import ensure_schema
 from importers.axis_statement import import_axis_statement, parse_axis_pages
@@ -214,6 +215,25 @@ class AxisImportFlowTests(unittest.TestCase):
         )
         self.assertEqual(
             len([a for a in get_accounts() if a["name"] == "Axis Bank"]), 1,
+        )
+
+    def test_pan_on_a_broker_account_does_not_capture_bank_rows(self):
+        # Regression: the live Main broker carries the user's PAN (from
+        # the Groww import). PAN matching would have filed the Axis
+        # statement under it instead of creating 'Axis Bank'.
+        broker = find_account_by_name("Main broker")
+        update_account_details(broker["id"], pan="ABCDE1234F")
+
+        result = self._import()
+
+        self.assertIn("Created account 'Axis Bank' (PERSONAL)", result.notes)
+        self.assertEqual(
+            len(get_bank_transactions(account_id=broker["id"])), 0,
+        )
+        self.assertEqual(
+            len(get_bank_transactions(
+                account_id=find_account_by_name("Axis Bank")["id"],
+            )), 7,
         )
 
     def test_explicit_account_choice_wins_over_detection(self):
