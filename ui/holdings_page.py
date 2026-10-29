@@ -32,8 +32,9 @@ _COLUMNS = (
 
 class HoldingsPage(ctk.CTkFrame):
 
-    def __init__(self, parent):
+    def __init__(self, parent, account_id=None):
         super().__init__(parent, fg_color=BACKGROUND)
+        self._account_id = account_id  # None = every account
         self.pack(fill="both", expand=True)
         self._build()
 
@@ -62,7 +63,7 @@ class HoldingsPage(ctk.CTkFrame):
         self._manual_list()
 
     def _summary_line(self):
-        stocks, _ = split_holdings_by_class(get_holdings())
+        stocks, _ = split_holdings_by_class(get_holdings(self._account_id))
         invested = sum(row["invested_amount"] for row in stocks)
         return (
             f"{len(stocks)} stock positions - total invested "
@@ -72,7 +73,7 @@ class HoldingsPage(ctk.CTkFrame):
     def _table(self):
         """Scrollable stocks table, or a friendly empty state."""
 
-        stocks, _ = split_holdings_by_class(get_holdings())
+        stocks, _ = split_holdings_by_class(get_holdings(self._account_id))
 
         if not stocks:
             ctk.CTkLabel(

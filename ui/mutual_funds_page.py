@@ -24,8 +24,9 @@ _COLUMNS = (
 
 class MutualFundsPage(ctk.CTkFrame):
 
-    def __init__(self, parent):
+    def __init__(self, parent, account_id=None):
         super().__init__(parent, fg_color=BACKGROUND)
+        self._account_id = account_id  # None = every account
         self.pack(fill="both", expand=True)
         self._build()
 
@@ -53,7 +54,7 @@ class MutualFundsPage(ctk.CTkFrame):
         """Holdings classified as Mutual Fund or ETF, input order."""
 
         funds = []
-        for holding in get_holdings():
+        for holding in get_holdings(self._account_id):
             label = fund_or_fno_label(str(holding.get("symbol") or ""))
             if label in ("Mutual Fund", "ETF"):
                 funds.append((label, holding))
