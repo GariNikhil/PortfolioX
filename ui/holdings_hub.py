@@ -8,14 +8,12 @@ import customtkinter as ctk
 
 from ui.coming_soon_page import ComingSoonPage
 from ui.holdings_page import HoldingsPage
+from ui.mutual_funds_page import MutualFundsPage
 from ui.theme import *
 
 TABS = (
     ("Stocks", lambda parent: HoldingsPage(parent)),
-    ("Mutual Funds", lambda parent: ComingSoonPage(
-        parent, "Mutual Funds",
-        "Mutual fund holdings will appear here once a CAS or "
-        "broker statement importer is added.")),
+    ("Mutual Funds", lambda parent: MutualFundsPage(parent)),
     ("IPO", lambda parent: ComingSoonPage(
         parent, "IPO",
         "IPO applications and allotments will be tracked here "

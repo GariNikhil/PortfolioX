@@ -75,6 +75,22 @@ def metadata_allocation(holdings, metadata, classify):
     )
 
 
+def split_holdings_by_class(holdings):
+    """Split holdings into (stocks, funds) tables.
+
+    Funds are the locally classified Mutual Fund / ETF symbols (the
+    name heuristics in fund_or_fno_label); everything else - plain
+    stocks and F&O contracts - stays in the stocks table. Returns two
+    lists in the input order.
+    """
+
+    stocks, funds = [], []
+    for holding in holdings:
+        label = fund_or_fno_label(str(holding.get("symbol") or ""))
+        (funds if label in ("Mutual Fund", "ETF") else stocks).append(holding)
+    return stocks, funds
+
+
 def sector_allocation(holdings, metadata):
     """Sector split by invested amount (rupees).
 

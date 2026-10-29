@@ -2,7 +2,12 @@
 
 import unittest
 
-from calculations.allocation import asset_allocation, financial_year_of, financial_year_summary
+from calculations.allocation import (
+    asset_allocation,
+    financial_year_of,
+    financial_year_summary,
+    split_holdings_by_class,
+)
 
 
 def _holding(symbol, invested):
@@ -34,6 +39,44 @@ class AssetAllocationTests(unittest.TestCase):
             asset_allocation([{"symbol": "RELIANCE", "invested_amount": None}]),
             [],
         )
+
+
+class SplitHoldingsByClassTests(unittest.TestCase):
+    def test_funds_move_out_stocks_and_fno_stay(self):
+        holdings = [
+            _holding("RELIANCE", 5000.0),
+            _holding("BANKNIFTY 45000 CE 2023-07-13", 2500.0),
+            _holding("PARAG PARIKH ELSS TAX SAVER FUND DIRECT GROWTH", 2000.0),
+            _holding("GROWWAMC - GROWWGOLD", 1000.0),
+            _holding("VEDANTA", 1000.0),
+        ]
+
+        stocks, funds = split_holdings_by_class(holdings)
+
+        self.assertEqual(
+            [row["symbol"] for row in stocks],
+            ["RELIANCE", "BANKNIFTY 45000 CE 2023-07-13", "VEDANTA"],
+        )
+        self.assertEqual(
+            [row["symbol"] for row in funds],
+            ["PARAG PARIKH ELSS TAX SAVER FUND DIRECT GROWTH",
+             "GROWWAMC - GROWWGOLD"],
+        )
+
+    def test_input_order_is_kept(self):
+        holdings = [
+            _holding("SBI ELSS TAX SAVER FUND DIRECT GROWTH", 10.0),
+            _holding("PNB", 20.0),
+        ]
+        stocks, funds = split_holdings_by_class(holdings)
+        self.assertEqual([row["symbol"] for row in stocks], ["PNB"])
+        self.assertEqual(
+            [row["symbol"] for row in funds],
+            ["SBI ELSS TAX SAVER FUND DIRECT GROWTH"],
+        )
+
+    def test_empty_holdings(self):
+        self.assertEqual(split_holdings_by_class([]), ([], []))
 
 
 class FinancialYearTests(unittest.TestCase):

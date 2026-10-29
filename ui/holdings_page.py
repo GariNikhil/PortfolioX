@@ -1,12 +1,16 @@
-"""Holdings page: the full holdings cache as a scrollable table.
+"""Holdings page: the stocks side of the holdings cache as a table.
 
-Also hosts hand-entered positions: manual holdings live in their own
-table and are merged into the rebuilt cache, so they show up in the
-main table alongside transaction-derived positions.
+Mutual fund and ETF positions are picked out by name heuristics and
+shown on the hub's Mutual Funds tab instead (see mutual_funds_page);
+this page keeps plain stocks and F&O contracts. It also hosts
+hand-entered positions: manual holdings live in their own table and
+are merged into the rebuilt cache, so they show up in the main table
+alongside transaction-derived positions.
 """
 
 import customtkinter as ctk
 
+from calculations.allocation import split_holdings_by_class
 from database.manager import (
     add_manual_holding,
     delete_manual_holding,
@@ -58,22 +62,22 @@ class HoldingsPage(ctk.CTkFrame):
         self._manual_list()
 
     def _summary_line(self):
-        holdings = get_holdings()
-        invested = sum(row["invested_amount"] for row in holdings)
+        stocks, _ = split_holdings_by_class(get_holdings())
+        invested = sum(row["invested_amount"] for row in stocks)
         return (
-            f"{len(holdings)} open positions - total invested "
+            f"{len(stocks)} stock positions - total invested "
             f"{format_rupees(invested)} (market value arrives with live prices)"
         )
 
     def _table(self):
-        """Scrollable holdings table, or a friendly empty state."""
+        """Scrollable stocks table, or a friendly empty state."""
 
-        holdings = get_holdings()
+        stocks, _ = split_holdings_by_class(get_holdings())
 
-        if not holdings:
+        if not stocks:
             ctk.CTkLabel(
                 self,
-                text="No holdings yet - import a broker file or add one manually below.",
+                text="No stock holdings yet - import a broker file or add one manually below.",
                 font=BODY_FONT,
                 text_color=TEXT_SECONDARY,
             ).pack(pady=10)
@@ -94,7 +98,7 @@ class HoldingsPage(ctk.CTkFrame):
         body = ctk.CTkScrollableFrame(self, fg_color=BACKGROUND, height=220)
         body.pack(fill="both", expand=True, padx=PADDING, pady=(4, PADDING))
 
-        for row in holdings:
+        for row in stocks:
             line = ctk.CTkFrame(body, fg_color=CARD, corner_radius=6)
             line.pack(fill="x", pady=2)
             for value, (_, width, anchor) in zip(
