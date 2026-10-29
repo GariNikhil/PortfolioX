@@ -10,6 +10,7 @@ rebuild_holdings() recomputes it from transactions so it cannot drift.
 from collections import namedtuple
 
 from database.db import create_connection, execute_query, fetch_all, transaction
+from calculations.allocation import fund_or_fno_label
 from calculations.fno import normalize_fno_symbol
 from calculations.holdings import calculate_holdings
 
@@ -282,6 +283,10 @@ def rebuild_holdings():
     'manual' rows add their quantity to any transaction-derived position
     for the same (account, symbol); 'holding_report' rows (imported
     broker statements) replace the transaction-derived row outright.
+    Once an account has a statement for an asset class, that class's
+    holdings come from the statement alone: transaction-derived
+    positions it does not list are stale and drop out of the cache
+    (their transactions stay as history).
     """
 
     groups = {}
@@ -790,6 +795,52 @@ def move_holding(account_id, symbol, new_account_id):
     return moved
 
 
+def delete_holding(account_id, symbol):
+    """Delete every row behind one holding.
+
+    The holding is identified by its current (account_id, symbol) -
+    account_id may be None for unassigned rows. When the position is
+    backed by a statement snapshot (holding_report / mf_holding_report)
+    only the snapshot rows are removed, so the imported trade history
+    survives; the statement rule keeps the position out of the rebuilt
+    cache regardless. Otherwise the underlying transactions are removed
+    too, because a purely transaction-derived position would reappear
+    on the next rebuild. Returns a (manual_rows, transaction_rows)
+    tuple; the caller rebuilds the holdings cache afterwards.
+    """
+
+    symbol = str(symbol or "").strip().upper()
+    if not symbol:
+        raise ValueError("symbol must not be empty")
+
+    with transaction() as connection:
+        snapshot = connection.execute(
+            """
+            SELECT COUNT(*) FROM manual_holdings
+            WHERE account_id IS ? AND UPPER(symbol) = ?
+              AND source IN ('holding_report', 'mf_holding_report')
+            """,
+            (account_id, symbol),
+        ).fetchone()[0]
+
+        cursor = connection.execute(
+            "DELETE FROM manual_holdings "
+            "WHERE account_id IS ? AND UPPER(symbol) = ?",
+            (account_id, symbol),
+        )
+        manual_deleted = cursor.rowcount
+
+        transaction_deleted = 0
+        if not snapshot:
+            cursor = connection.execute(
+                "DELETE FROM transactions "
+                "WHERE account_id IS ? AND UPPER(symbol) = ?",
+                (account_id, symbol),
+            )
+            transaction_deleted = cursor.rowcount
+    return manual_deleted, transaction_deleted
+
+
 def _merge_manual_holdings(rebuilt, priced):
     """Fold manual_holdings rows into the rebuilt cache; returns the merge.
 
@@ -802,13 +853,24 @@ def _merge_manual_holdings(rebuilt, priced):
     - snapshot sources ('holding_report', 'mf_holding_report'): the
       statement is the authoritative CURRENT position, so it replaces the
       transaction-derived row outright (the report knows about sells the
-      contract notes may not).
+      contract notes may not). Stronger still: once an account has a
+      statement for an asset class, transaction-derived positions of
+      that class the statement does not list are stale (sold outside
+      the imported files) and drop out of the cache - the transactions
+      themselves stay as history. Stock/F&O positions are governed by
+      holding_report rows, fund positions by mf_holding_report rows.
+      Manually added positions are explicit user intent and survive.
 
     Manual symbols are canonicalized like transaction symbols; the
     manual_holdings table keeps its verbatim symbol.
     """
 
     by_key = {(row.account_id, row.symbol): row for row in rebuilt}
+
+    snapshot_keys = set()
+    manual_keys = set()
+    stock_snapshots = {}  # account_id -> statement symbols (stocks + F&O)
+    fund_snapshots = {}  # account_id -> statement symbols (funds)
 
     for manual in fetch_all(
         "SELECT account_id, symbol, quantity, average_price, source "
@@ -828,6 +890,14 @@ def _merge_manual_holdings(rebuilt, priced):
             profit_loss = market_value - invested_paise
 
         if manual["source"] != "manual":
+            snapshot_keys.add(key)
+            snapshots = (
+                fund_snapshots if manual["source"] == "mf_holding_report"
+                else stock_snapshots
+            )
+            snapshots.setdefault(manual["account_id"], set()).add(
+                symbol.upper(),
+            )
             by_key[key] = RebuiltHolding(
                 account_id=manual["account_id"],
                 symbol=symbol,
@@ -838,6 +908,8 @@ def _merge_manual_holdings(rebuilt, priced):
                 profit_loss=profit_loss,
             )
             continue
+
+        manual_keys.add(key)
 
         existing = by_key.get(key)
         if existing is None:
@@ -871,7 +943,22 @@ def _merge_manual_holdings(rebuilt, priced):
             profit_loss=profit_loss,
         )
 
-    return list(by_key.values())
+    # Statement-authoritative pass: drop transaction-derived positions
+    # that a governing statement does not list (see the docstring).
+    governed = []
+    for key, row in by_key.items():
+        if key in snapshot_keys or key in manual_keys:
+            governed.append(row)
+            continue
+        snapshot_symbols = (
+            fund_snapshots.get(row.account_id)
+            if fund_or_fno_label(row.symbol) == "Mutual Fund"
+            else stock_snapshots.get(row.account_id)
+        )
+        if snapshot_symbols is not None and row.symbol.upper() not in snapshot_symbols:
+            continue
+        governed.append(row)
+    return governed
 
 
 # ------------------------------------------------------------------ prices #

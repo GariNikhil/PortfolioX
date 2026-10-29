@@ -13,6 +13,7 @@ import customtkinter as ctk
 from calculations.allocation import split_holdings_by_class
 from database.manager import (
     add_manual_holding,
+    delete_holding,
     delete_manual_holding,
     get_accounts,
     get_holdings,
@@ -113,6 +114,14 @@ class HoldingsPage(ctk.CTkFrame):
             width=70,
             anchor="e",
         ).pack(side="left", padx=8)
+        ctk.CTkLabel(
+            header,
+            text="Delete",
+            font=SMALL_FONT,
+            text_color=TEXT_SECONDARY,
+            width=70,
+            anchor="e",
+        ).pack(side="left", padx=8)
 
         body = ctk.CTkScrollableFrame(self, fg_color=BACKGROUND, height=220)
         body.pack(fill="both", expand=True, padx=PADDING, pady=(4, PADDING))
@@ -149,7 +158,13 @@ class HoldingsPage(ctk.CTkFrame):
                 line, text="Move", width=70, height=24,
                 fg_color="transparent", border_width=1,
                 text_color=TEXT,
-                command=lambda row=row: self._move_holding(line, row),
+                command=lambda row=row, line=line: self._move_holding(line, row),
+            ).pack(side="left", padx=(0, 8))
+            ctk.CTkButton(
+                line, text="Delete", width=70, height=24,
+                fg_color="transparent", border_width=1,
+                text_color=ERROR,
+                command=lambda row=row, line=line: self._delete_holding(line, row),
             ).pack(side="left", padx=(0, 8))
 
     def _move_holding(self, line, row):
@@ -203,6 +218,46 @@ class HoldingsPage(ctk.CTkFrame):
         ctk.CTkButton(
             line, text="Move", width=70, height=24,
             command=move_clicked,
+        ).pack(side="left", padx=8)
+        ctk.CTkButton(
+            line, text="Cancel", width=70, height=24,
+            fg_color="transparent", border_width=1,
+            text_color=TEXT_SECONDARY,
+            command=self._build,
+        ).pack(side="left", padx=(0, 8))
+
+    def _delete_holding(self, line, row):
+        """Swap a holdings row for a delete confirmation."""
+
+        for widget in line.winfo_children():
+            widget.destroy()
+
+        ctk.CTkLabel(
+            line,
+            text=f"Delete {row['symbol']} from {row['account_name'] or 'Unassigned'}?",
+            font=SMALL_FONT,
+            text_color=TEXT,
+            width=380,
+            anchor="w",
+        ).pack(side="left", padx=8)
+
+        def delete_clicked():
+            manual_rows, transaction_rows = delete_holding(
+                row["account_id"], row["symbol"],
+            )
+            if not manual_rows and not transaction_rows:
+                self._flash(f"{row['symbol']} has no rows to delete.", error=True)
+                return
+            rebuild_holdings()
+            self._build()
+            self._flash(
+                f"Deleted {row['symbol']} ({manual_rows} holding row(s), "
+                f"{transaction_rows} transaction(s) removed)."
+            )
+
+        ctk.CTkButton(
+            line, text="Delete", width=70, height=24,
+            command=delete_clicked,
         ).pack(side="left", padx=8)
         ctk.CTkButton(
             line, text="Cancel", width=70, height=24,

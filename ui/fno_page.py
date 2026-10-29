@@ -72,17 +72,10 @@ class FnoPage(ctk.CTkFrame):
         )
 
     def _table(self):
-        """Scrollable contract table, or a friendly empty state."""
+        """Scrollable contract table; the summary line covers the empty case."""
 
         contracts = self._fno_holdings()
         if not contracts:
-            ctk.CTkLabel(
-                self,
-                text="No open F&O positions - option and futures trades "
-                     "that squared off appear on the Transactions page.",
-                font=BODY_FONT,
-                text_color=TEXT_SECONDARY,
-            ).pack(pady=10)
             return
 
         header = ctk.CTkFrame(self, fg_color="transparent")

@@ -12,12 +12,14 @@ from database.manager import (
     UNASSIGNED,
     add_manual_holding,
     add_transactions,
+    delete_holding,
     delete_manual_holding,
     fill_account_details_if_empty,
     find_account_by_name,
     get_accounts,
     get_holdings,
     get_manual_holdings,
+    get_transactions,
     move_holding,
     rebuild_holdings,
     replace_holding_report,
@@ -308,6 +310,58 @@ class V5LayerTests(unittest.TestCase):
         self.assertIsNone(move_holding(broker["id"], "ITC", 99999))
         self.assertEqual(move_holding(broker["id"], "ITC", broker["id"]), 0)
 
+    def test_delete_holding_keeps_history_behind_a_snapshot(self):
+        broker = find_account_by_name("Main broker")
+        add_transactions([{
+            "trade_date": "2026-01-05", "symbol": "PUNJAB NATIONAL BANK",
+            "transaction_type": "BUY", "quantity": 10, "price": 100,
+        }], account_id=broker["id"])
+        replace_holding_report(
+            [
+                {"symbol": "PUNJAB NATIONAL BANK", "quantity": 3,
+                 "average_price": 108},
+                {"symbol": "ITC", "quantity": 5, "average_price": 400},
+            ],
+            account_id=broker["id"],
+        )
+        rebuild_holdings()
+        self.assertEqual(len(get_holdings(account_id=broker["id"])), 2)
+
+        manual_rows, transaction_rows = delete_holding(
+            broker["id"], "punjab national bank",
+        )
+        self.assertEqual((manual_rows, transaction_rows), (1, 0))
+
+        rebuild_holdings()
+        rows = get_holdings(account_id=broker["id"])
+        self.assertEqual([row["symbol"] for row in rows], ["ITC"])
+        # The trade history behind the deleted statement row survives.
+        self.assertEqual(len(get_transactions(account_id=broker["id"])), 1)
+
+    def test_delete_holding_removes_transaction_derived_position(self):
+        broker = find_account_by_name("Main broker")
+        add_transactions([{
+            "trade_date": "2026-01-05", "symbol": "VEDANTA",
+            "transaction_type": "BUY", "quantity": 4, "price": 300,
+        }], account_id=broker["id"])
+        rebuild_holdings()
+        self.assertEqual(len(get_holdings(account_id=broker["id"])), 1)
+
+        manual_rows, transaction_rows = delete_holding(
+            broker["id"], "vedanta",
+        )
+        self.assertEqual((manual_rows, transaction_rows), (0, 1))
+
+        rebuild_holdings()
+        self.assertEqual(get_holdings(account_id=broker["id"]), [])
+        self.assertEqual(get_transactions(account_id=broker["id"]), [])
+
+    def test_delete_holding_empty_symbol_and_unknown_account(self):
+        with self.assertRaises(ValueError):
+            delete_holding(None, "   ")
+        # Nothing matches: no error, just zero rows everywhere.
+        self.assertEqual(delete_holding(99999, "ITC"), (0, 0))
+
     # ------------------------------------------ holding-report semantics #
 
     def test_mf_report_and_stock_report_replace_independently(self):
@@ -463,6 +517,89 @@ class V5LayerTests(unittest.TestCase):
         by_account = {row.account_id: row for row in rebuilt}
         self.assertEqual(by_account[broker["id"]].quantity, 2)
         self.assertEqual(by_account[personal["id"]].quantity, 10)  # untouched
+
+    def test_statement_drops_stale_transaction_positions(self):
+        """A stock statement governs its account: unlisted positions drop."""
+        broker = find_account_by_name("Main broker")
+        add_transactions(
+            [
+                {
+                    "trade_date": "2026-01-05", "symbol": "RELIANCE",
+                    "transaction_type": "BUY", "quantity": 10, "price": 2500,
+                },
+                {
+                    "trade_date": "2026-01-06", "symbol": "ITC",
+                    "transaction_type": "BUY", "quantity": 5, "price": 400,
+                },
+                {
+                    "trade_date": "2026-01-07", "symbol": "BANKNIFTY 45000 CE 2026-01-29",
+                    "transaction_type": "BUY", "quantity": 25, "price": 100,
+                },
+            ],
+            account_id=broker["id"],
+        )
+        replace_holding_report(
+            [{"symbol": "RELIANCE", "quantity": 10, "average_price": 2500}],
+            account_id=broker["id"],
+        )
+        rebuild_holdings()
+
+        rows = get_holdings(account_id=broker["id"])
+        # ITC and the F&O contract are not in the statement: sold outside
+        # the imported files, so only RELIANCE remains as a holding.
+        self.assertEqual([row["symbol"] for row in rows], ["RELIANCE"])
+        # The dropped positions stay as transaction history.
+        self.assertEqual(len(get_transactions(account_id=broker["id"])), 3)
+
+    def test_mf_statement_governs_only_fund_positions(self):
+        broker = find_account_by_name("Main broker")
+        add_transactions(
+            [
+                {
+                    "trade_date": "2026-01-05", "symbol": "RELIANCE",
+                    "transaction_type": "BUY", "quantity": 10, "price": 2500,
+                },
+                {
+                    "trade_date": "2026-01-06",
+                    "symbol": "SBI ELSS TAX SAVER FUND DIRECT GROWTH",
+                    "transaction_type": "BUY", "quantity": 2, "price": 500,
+                },
+            ],
+            account_id=broker["id"],
+        )
+        replace_holding_report(
+            [{"symbol": "SBI ELSS TAX SAVER FUND DIRECT GROWTH",
+              "quantity": 4, "average_price": 480}],
+            account_id=broker["id"],
+            source="mf_holding_report",
+        )
+        rebuild_holdings()
+
+        rows = get_holdings(account_id=broker["id"])
+        symbols = {row["symbol"] for row in rows}
+        # The fund statement governs funds only; the stock position is
+        # untouched because no stock statement exists for the account.
+        self.assertEqual(symbols, {"RELIANCE",
+                                   "SBI ELSS TAX SAVER FUND DIRECT GROWTH"})
+
+    def test_manual_position_survives_statement_governance(self):
+        broker = find_account_by_name("Main broker")
+        add_transactions([{
+            "trade_date": "2026-01-05", "symbol": "RELIANCE",
+            "transaction_type": "BUY", "quantity": 10, "price": 2500,
+        }], account_id=broker["id"])
+        replace_holding_report(
+            [{"symbol": "ITC", "quantity": 5, "average_price": 400}],
+            account_id=broker["id"],
+        )
+        add_manual_holding(broker["id"], "TATASTEEL", 5, 100)
+        rebuild_holdings()
+
+        rows = get_holdings(account_id=broker["id"])
+        symbols = {row["symbol"] for row in rows}
+        # The hand-added position is user intent; only the unlisted
+        # transaction-derived RELIANCE drops out.
+        self.assertEqual(symbols, {"ITC", "TATASTEEL"})
 
     def test_replace_holding_report_validates(self):
         broker = find_account_by_name("Main broker")
