@@ -698,6 +698,98 @@ def delete_manual_holding(manual_id):
     return cursor.rowcount > 0
 
 
+def update_manual_holding(manual_id, account_id, symbol, quantity,
+                          average_price):
+    """Edit one manual holding row in place; True when it exists.
+
+    All fields are replaced (the editor supplies the full row). The
+    (account, symbol) pair must not collide with a different manual
+    row - the table enforces UNIQUE(account_id, symbol).
+    """
+
+    symbol = str(symbol or "").strip().upper()
+    if not symbol:
+        raise ValueError("symbol must not be empty")
+
+    quantity = float(quantity or 0)
+    if not quantity > 0:
+        raise ValueError("quantity must be greater than zero")
+
+    average_price = float(average_price or 0)
+    if average_price < 0:
+        raise ValueError("average price cannot be negative")
+
+    if find_account_by_id(account_id) is None:
+        raise ValueError(f"account id {account_id} does not exist")
+
+    if fetch_all(
+        "SELECT id FROM manual_holdings WHERE id = ? LIMIT 1",
+        (manual_id,),
+    ) == []:
+        return False
+
+    existing = fetch_all(
+        """
+        SELECT id FROM manual_holdings
+        WHERE account_id = ? AND symbol = ? AND id != ?
+        """,
+        (account_id, symbol, manual_id),
+    )
+    if existing:
+        raise ValueError(
+            f"{symbol} already exists as a manual entry for this account"
+        )
+
+    with transaction() as connection:
+        cursor = connection.execute(
+            """
+            UPDATE manual_holdings
+            SET account_id = ?, symbol = ?, quantity = ?,
+                average_price = ?
+            WHERE id = ?
+            """,
+            (account_id, symbol, quantity, _to_paise(average_price),
+             manual_id),
+        )
+    return cursor.rowcount > 0
+
+
+def move_holding(account_id, symbol, new_account_id):
+    """Retag every row behind one holding to another account.
+
+    The holding is identified by its current (account_id, symbol) -
+    account_id may be None for unassigned rows. Transactions and manual
+    entries with that account and symbol are retagged to new_account_id;
+    the caller rebuilds the holdings cache afterwards. If the target
+    account already holds the same symbol, the positions merge on
+    rebuild. Returns the number of rows retagged, or None when the
+    target account does not exist.
+    """
+
+    if find_account_by_id(new_account_id) is None:
+        return None
+
+    symbol = str(symbol or "").strip().upper()
+    if not symbol:
+        raise ValueError("symbol must not be empty")
+    if account_id == new_account_id:
+        return 0
+
+    moved = 0
+    with transaction() as connection:
+        for table in ("transactions", "manual_holdings"):
+            cursor = connection.execute(
+                f"""
+                UPDATE {table}
+                SET account_id = ?
+                WHERE account_id IS ? AND UPPER(symbol) = ?
+                """,
+                (new_account_id, account_id, symbol),
+            )
+            moved += cursor.rowcount
+    return moved
+
+
 def _merge_manual_holdings(rebuilt, priced):
     """Fold manual_holdings rows into the rebuilt cache; returns the merge.
 

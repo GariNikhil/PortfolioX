@@ -1,9 +1,10 @@
-"""Mutual Funds page: fund-type holdings from the holdings cache.
+"""Mutual Funds page: mutual fund holdings from the holdings cache.
 
-Mutual funds and ETFs are picked out of the rebuilt holdings cache by
+Mutual fund positions are picked out of the rebuilt holdings cache by
 the same name heuristics the dashboard splits use (ELSS / '... FUND'
-names, 'GROWWAMC - ...' ETFs), so imported broker positions land here
-without a separate importer. A Type column distinguishes the two.
+names), so imported broker positions land here without a separate
+importer. ETFs trade like stocks and stay in the Stocks tab; a Type
+column is kept for when other fund kinds arrive.
 """
 
 import customtkinter as ctk
@@ -51,13 +52,12 @@ class MutualFundsPage(ctk.CTkFrame):
         self._table()
 
     def _fund_holdings(self):
-        """Holdings classified as Mutual Fund or ETF, input order."""
+        """Holdings classified as Mutual Fund, input order."""
 
         funds = []
         for holding in get_holdings(self._account_id):
-            label = fund_or_fno_label(str(holding.get("symbol") or ""))
-            if label in ("Mutual Fund", "ETF"):
-                funds.append((label, holding))
+            if fund_or_fno_label(str(holding.get("symbol") or "")) == "Mutual Fund":
+                funds.append(("Mutual Fund", holding))
         return funds
 
     def _summary_line(self):
@@ -67,8 +67,8 @@ class MutualFundsPage(ctk.CTkFrame):
         )
         if not funds:
             return (
-                "No fund holdings yet - ELSS and ETF positions from "
-                "broker imports appear here"
+                "No mutual fund holdings yet - ELSS and fund positions "
+                "from broker imports appear here"
             )
         return (
             f"{len(funds)} fund positions - total invested "

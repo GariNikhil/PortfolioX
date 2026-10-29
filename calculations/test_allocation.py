@@ -42,25 +42,27 @@ class AssetAllocationTests(unittest.TestCase):
 
 
 class SplitHoldingsByClassTests(unittest.TestCase):
-    def test_funds_move_out_stocks_and_fno_stay(self):
+    def test_etf_stays_with_stocks_fund_tab_gets_mutual_funds(self):
         holdings = [
             _holding("RELIANCE", 5000.0),
             _holding("BANKNIFTY 45000 CE 2023-07-13", 2500.0),
-            _holding("PARAG PARIKH ELSS TAX SAVER FUND DIRECT GROWTH", 2000.0),
             _holding("GROWWAMC - GROWWGOLD", 1000.0),
+            _holding("PARAG PARIKH ELSS TAX SAVER FUND DIRECT GROWTH", 2000.0),
             _holding("VEDANTA", 1000.0),
         ]
 
         stocks, funds = split_holdings_by_class(holdings)
 
+        # ETFs trade like stocks, so they stay in the stocks table;
+        # only mutual funds land in the funds table.
         self.assertEqual(
             [row["symbol"] for row in stocks],
-            ["RELIANCE", "BANKNIFTY 45000 CE 2023-07-13", "VEDANTA"],
+            ["RELIANCE", "BANKNIFTY 45000 CE 2023-07-13",
+             "GROWWAMC - GROWWGOLD", "VEDANTA"],
         )
         self.assertEqual(
             [row["symbol"] for row in funds],
-            ["PARAG PARIKH ELSS TAX SAVER FUND DIRECT GROWTH",
-             "GROWWAMC - GROWWGOLD"],
+            ["PARAG PARIKH ELSS TAX SAVER FUND DIRECT GROWTH"],
         )
 
     def test_input_order_is_kept(self):

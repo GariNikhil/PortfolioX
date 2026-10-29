@@ -9,6 +9,7 @@ from pathlib import Path
 
 from database import db, schema
 from database.manager import (
+    UNASSIGNED,
     add_manual_holding,
     add_transactions,
     delete_manual_holding,
@@ -17,12 +18,14 @@ from database.manager import (
     get_accounts,
     get_holdings,
     get_manual_holdings,
+    move_holding,
     rebuild_holdings,
     replace_holding_report,
     set_account_balance,
     set_price,
     set_symbol_alias,
     update_account_details,
+    update_manual_holding,
 )
 
 
@@ -201,6 +204,109 @@ class V5LayerTests(unittest.TestCase):
         broker = find_account_by_name("Main broker")
         with self.assertRaises(ValueError):
             add_manual_holding(broker["id"], "ITC", 5, 400, source="snacks")
+
+    # -------------------------------------------------- edit + move tests #
+
+    def test_update_manual_holding_roundtrip(self):
+        broker = find_account_by_name("Main broker")
+        personal = find_account_by_name("Main personal")
+        add_manual_holding(broker["id"], "ITC", 5, 400)
+        manual_id = get_manual_holdings()[0]["id"]
+
+        self.assertTrue(update_manual_holding(
+            manual_id, personal["id"], "itc ltd ", "12", "355.5",
+        ))
+
+        rows = get_manual_holdings(account_id=personal["id"])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["symbol"], "ITC LTD")
+        self.assertEqual(rows[0]["quantity"], 12)
+        self.assertEqual(rows[0]["average_price"], 355.50)
+        self.assertEqual(rows[0]["account_name"], "Main personal")
+        self.assertEqual(get_manual_holdings(account_id=broker["id"]), [])
+
+        # The edited row drives the rebuilt cache.
+        rebuilt = rebuild_holdings()
+        self.assertEqual(len(rebuilt), 1)
+        self.assertEqual(rebuilt[0].account_id, personal["id"])
+        self.assertEqual(rebuilt[0].quantity, 12)
+
+    def test_update_manual_holding_missing_id_and_validation(self):
+        broker = find_account_by_name("Main broker")
+        add_manual_holding(broker["id"], "ITC", 5, 400)
+        manual_id = get_manual_holdings()[0]["id"]
+
+        self.assertFalse(update_manual_holding(
+            99999, broker["id"], "ITC", 5, 400,
+        ))
+        with self.assertRaises(ValueError):
+            update_manual_holding(manual_id, broker["id"], "  ", 5, 400)
+        with self.assertRaises(ValueError):
+            update_manual_holding(manual_id, broker["id"], "ITC", 0, 400)
+        with self.assertRaises(ValueError):
+            update_manual_holding(manual_id, broker["id"], "ITC", 5, -1)
+        with self.assertRaises(ValueError):
+            update_manual_holding(manual_id, 9999, "ITC", 5, 400)
+
+    def test_update_manual_holding_rejects_duplicate_symbol(self):
+        broker = find_account_by_name("Main broker")
+        add_manual_holding(broker["id"], "ITC", 5, 400)
+        add_manual_holding(broker["id"], "RELIANCE", 1, 2500)
+        rows = get_manual_holdings()
+        itc_id = next(row["id"] for row in rows if row["symbol"] == "ITC")
+
+        # Editing ITC into RELIANCE would collide with the other row.
+        with self.assertRaises(ValueError):
+            update_manual_holding(itc_id, broker["id"], "RELIANCE", 5, 400)
+
+        # Same symbol but a different account is fine.
+        personal = find_account_by_name("Main personal")
+        self.assertTrue(update_manual_holding(
+            itc_id, personal["id"], "RELIANCE", 5, 400,
+        ))
+
+    def test_move_holding_retags_transactions_and_manual_rows(self):
+        broker = find_account_by_name("Main broker")
+        personal = find_account_by_name("Main personal")
+        add_transactions([{
+            "trade_date": "2026-01-05", "symbol": "RELIANCE",
+            "transaction_type": "BUY", "quantity": 10, "price": 2500,
+        }], account_id=broker["id"])
+        add_manual_holding(broker["id"], "RELIANCE", 2, 2600)
+
+        moved = move_holding(broker["id"], "Reliance", personal["id"])
+        self.assertEqual(moved, 2)  # 1 transaction + 1 manual row
+
+        rebuild_holdings()
+        rows = get_holdings(account_id=personal["id"])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["symbol"], "RELIANCE")
+        # 10 bought + 2 manual merged into one position.
+        self.assertEqual(rows[0]["quantity"], 12)
+        self.assertEqual(get_holdings(account_id=broker["id"]), [])
+
+    def test_move_holding_moves_unassigned_rows(self):
+        add_transactions([{
+            "trade_date": "2026-01-05", "symbol": "VEDANTA",
+            "transaction_type": "BUY", "quantity": 4, "price": 300,
+        }])
+        broker = find_account_by_name("Main broker")
+
+        moved = move_holding(None, "VEDANTA", broker["id"])
+        self.assertEqual(moved, 1)
+
+        rebuild_holdings()
+        rows = get_holdings(account_id=broker["id"])
+        self.assertEqual(
+            [row["symbol"] for row in rows], ["VEDANTA"],
+        )
+        self.assertEqual(get_holdings(account_id=UNASSIGNED), [])
+
+    def test_move_holding_missing_target_and_same_account(self):
+        broker = find_account_by_name("Main broker")
+
+        self.assertIsNone(move_holding(broker["id"], "ITC", 99999))
+        self.assertEqual(move_holding(broker["id"], "ITC", broker["id"]), 0)
 
     # ------------------------------------------ holding-report semantics #
 

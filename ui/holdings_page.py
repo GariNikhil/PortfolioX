@@ -17,16 +17,18 @@ from database.manager import (
     get_accounts,
     get_holdings,
     get_manual_holdings,
+    move_holding,
     rebuild_holdings,
+    update_manual_holding,
 )
 from ui.formatting import format_quantity, format_rupees
 from ui.theme import *
 
 _COLUMNS = (
-    ("Symbol", 320, "w"),
-    ("Quantity", 140, "e"),
-    ("Avg Price", 160, "e"),
-    ("Invested", 200, "e"),
+    ("Symbol", 240, "w"),
+    ("Quantity", 110, "e"),
+    ("Avg Price", 130, "e"),
+    ("Invested", 150, "e"),
 )
 
 
@@ -95,6 +97,22 @@ class HoldingsPage(ctk.CTkFrame):
                 width=width,
                 anchor=anchor,
             ).pack(side="left", padx=8)
+        ctk.CTkLabel(
+            header,
+            text="Account",
+            font=SMALL_FONT,
+            text_color=TEXT_SECONDARY,
+            width=110,
+            anchor="w",
+        ).pack(side="left", padx=8)
+        ctk.CTkLabel(
+            header,
+            text="Move",
+            font=SMALL_FONT,
+            text_color=TEXT_SECONDARY,
+            width=70,
+            anchor="e",
+        ).pack(side="left", padx=8)
 
         body = ctk.CTkScrollableFrame(self, fg_color=BACKGROUND, height=220)
         body.pack(fill="both", expand=True, padx=PADDING, pady=(4, PADDING))
@@ -119,6 +137,79 @@ class HoldingsPage(ctk.CTkFrame):
                     width=width,
                     anchor=anchor,
                 ).pack(side="left", padx=8)
+            ctk.CTkLabel(
+                line,
+                text=row["account_name"] or "Unassigned",
+                font=SMALL_FONT,
+                text_color=TEXT_SECONDARY,
+                width=110,
+                anchor="w",
+            ).pack(side="left", padx=8)
+            ctk.CTkButton(
+                line, text="Move", width=70, height=24,
+                fg_color="transparent", border_width=1,
+                text_color=TEXT,
+                command=lambda row=row: self._move_holding(line, row),
+            ).pack(side="left", padx=(0, 8))
+
+    def _move_holding(self, line, row):
+        """Swap a holdings row for an inline move-to-account editor."""
+
+        for widget in line.winfo_children():
+            widget.destroy()
+
+        ctk.CTkLabel(
+            line,
+            text=f"Move {row['symbol']} to:",
+            font=SMALL_FONT,
+            text_color=TEXT,
+            width=320,
+            anchor="w",
+        ).pack(side="left", padx=8)
+
+        accounts = get_accounts()
+        menu = ctk.CTkOptionMenu(
+            line,
+            values=[account["name"] for account in accounts] or ["(no accounts)"],
+            width=180,
+            height=24,
+        )
+        if accounts:
+            menu.set(accounts[0]["name"])
+        menu.pack(side="left", padx=8)
+
+        def move_clicked():
+            target = next(
+                (account for account in accounts
+                 if account["name"] == menu.get()),
+                None,
+            )
+            if target is None:
+                self._flash("Select an account first.", error=True)
+                return
+            moved = move_holding(
+                row["account_id"], row["symbol"], target["id"],
+            )
+            if moved is None:
+                self._flash("Account no longer exists.", error=True)
+                return
+            rebuild_holdings()
+            self._build()
+            self._flash(
+                f"Moved {row['symbol']} to {target['name']} "
+                f"({moved} row(s) retagged)."
+            )
+
+        ctk.CTkButton(
+            line, text="Move", width=70, height=24,
+            command=move_clicked,
+        ).pack(side="left", padx=8)
+        ctk.CTkButton(
+            line, text="Cancel", width=70, height=24,
+            fg_color="transparent", border_width=1,
+            text_color=TEXT_SECONDARY,
+            command=self._build,
+        ).pack(side="left", padx=(0, 8))
 
     # ------------------------------------------------- manual holdings #
 
@@ -166,9 +257,9 @@ class HoldingsPage(ctk.CTkFrame):
         ).pack(side="left")
 
     def _manual_list(self):
-        """Existing manual entries with delete buttons."""
+        """Manual entries under the current account filter, editable."""
 
-        manual = get_manual_holdings()
+        manual = get_manual_holdings(self._account_id)
         if not manual:
             return
 
@@ -202,11 +293,95 @@ class HoldingsPage(ctk.CTkFrame):
                 font=BODY_FONT, text_color=TEXT, width=130, anchor="e",
             ).pack(side="left", padx=8)
             ctk.CTkButton(
+                line, text="Edit", width=70, height=24,
+                fg_color="transparent", border_width=1,
+                text_color=TEXT,
+                command=lambda entry=entry, line=line:
+                    self._edit_manual_holding(line, entry),
+            ).pack(side="left", padx=(0, 8))
+            ctk.CTkButton(
                 line, text="Delete", width=70, height=24,
                 fg_color="transparent", border_width=1,
                 text_color=ERROR,
-                command=lambda entry_id=entry["id"]: self.delete_manual_clicked(entry_id),
+                command=lambda entry_id=entry["id"]:
+                    self.delete_manual_clicked(entry_id),
             ).pack(side="left", padx=(0, 8))
+
+    def _edit_manual_holding(self, line, entry):
+        """Swap a manual entry row for an inline edit form."""
+
+        for widget in line.winfo_children():
+            widget.destroy()
+
+        symbol_entry = ctk.CTkEntry(
+            line, width=220, height=24,
+        )
+        symbol_entry.insert(0, entry["symbol"])
+        symbol_entry.pack(side="left", padx=8)
+
+        quantity_entry = ctk.CTkEntry(line, width=100, height=24)
+        quantity_entry.insert(0, f"{entry['quantity']:g}")
+        quantity_entry.pack(side="left", padx=8)
+
+        price_entry = ctk.CTkEntry(line, width=120, height=24)
+        price_entry.insert(0, f"{entry['average_price']:.2f}")
+        price_entry.pack(side="left", padx=8)
+
+        accounts = get_accounts()
+        account_menu = ctk.CTkOptionMenu(
+            line,
+            values=[account["name"] for account in accounts] or ["(no accounts)"],
+            width=160,
+            height=24,
+        )
+        current = next(
+            (account for account in accounts
+             if account["name"] == entry["account_name"]),
+            None,
+        )
+        if current is not None:
+            account_menu.set(current["name"])
+        elif accounts:
+            account_menu.set(accounts[0]["name"])
+        account_menu.pack(side="left", padx=8)
+
+        def save_clicked():
+            account = next(
+                (account for account in accounts
+                 if account["name"] == account_menu.get()),
+                None,
+            )
+            if account is None:
+                self._flash("Select an account first.", error=True)
+                return
+            try:
+                updated = update_manual_holding(
+                    entry["id"],
+                    account["id"],
+                    symbol_entry.get().strip(),
+                    quantity_entry.get().strip(),
+                    price_entry.get().strip().replace(",", ""),
+                )
+            except ValueError as error:
+                self._flash(str(error), error=True)
+                return
+            if not updated:
+                self._flash("Manual entry no longer exists.", error=True)
+                return
+            rebuild_holdings()
+            self._build()
+            self._flash("Manual entry updated.")
+
+        ctk.CTkButton(
+            line, text="Save", width=70, height=24,
+            command=save_clicked,
+        ).pack(side="left", padx=8)
+        ctk.CTkButton(
+            line, text="Cancel", width=70, height=24,
+            fg_color="transparent", border_width=1,
+            text_color=TEXT_SECONDARY,
+            command=self._build,
+        ).pack(side="left", padx=(0, 8))
 
     def _selected_account_id(self):
         names = {
