@@ -20,6 +20,13 @@ All importers (Groww included) share the same contract, per
   SELL = qty×price − charges), ISO-8601 dates.
 - `ImportFileError` for file-level problems (after a FAILED audit entry),
   `RowFailure`/`ImportResult` for the row-level report.
+- **Audit-first imports (schema v9).** `commit_import()` records the audit
+  row as PENDING before inserting anything, tags every inserted row with
+  that audit id (`import_id` on transactions, bank_transactions and
+  manual_holdings), and flips the status to SUCCESS/FAILED when the batch
+  commits. Every imported row is therefore traceable to its source file,
+  and the Balance Statement page can Remove a file together with exactly
+  the rows it inserted (see `docs/database-layer.md`).
 - `commit_import()` dedupes by content key (date, **canonical** symbol, side,
   quantity, price in paise) — the symbol is canonicalized through the same
   F&O + alias normalization `rebuild_holdings()` applies, so the same trade

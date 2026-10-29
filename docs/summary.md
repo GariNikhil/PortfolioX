@@ -9,47 +9,32 @@ d:\projects\PortfolioX\
 ├── app.py                  # Entry point
 ├── requirements.txt        # Python dependencies
 ├── phases.md               # Development roadmap (12 phases)
-├── PRD.md                  # Phase 3 Product Requirements
-├── Tasks.md                # Phase 3 Task breakdown
-├── write_phases.py         # Script to generate phases.md
-├── database/               # Phase 2: Database layer
-│   ├── schema.py           # Table definitions
-│   └── manager.py          # CRUD operations
-├── calculations/           # Phase 4: Holdings calculator
-│   └── holdings.py         # Moving weighted-average cost
-├── importers/              # Phase 3: Groww import system
-│   └── groww.py            # CSV/XLSX parsing (to be created)
-├── ui/                     # Phase 5: CustomTkinter UI
+├── readme.md               # Project documentation
+├── database/               # SQLite schema (v9), manager, backups
+├── calculations/           # Holdings, F&O, allocation, XIRR
+├── importers/              # Groww, contract notes, IIFL, holding
+│                           # reports, Axis / PNB bank statements
+├── ui/                     # CustomTkinter pages and hubs
+├── security/               # Password vault
+├── tools/                  # CLI utilities (imports, exports, metadata)
 └── docs/                   # Documentation directory
-    ├── groww-import.md     # Groww import system documentation
-    ├── database-layer.md   # Phase 2 database documentation
-    └── holdings-calculator.md # Phase 4 holdings calculator documentation
 ```
 
 ## Phase Status
 | Phase | Status | Description |
 |-------|--------|-------------|
 | 1 | ✅ | Project Scaffold |
-| 2 | 🟡 | Database Layer (current focus) |
-| 3 | 🟡 | Groww Import System (next focus) |
-| 4 | ✅ | Holdings Calculator |
-| 5 | 🔵 | CustomTkinter UI |
-| 6-12 | 🔵 | Future phases |
+| 2 | ✅ | Database Layer (schema v9, versioned migrations) |
+| 3 | ✅ | Import system (Groww, contract notes, IIFL, holding reports, bank statements) |
+| 4 | ✅ | Holdings Calculator (statement-authoritative rebuilds) |
+| 5 | ✅ | CustomTkinter UI (holdings, banking, dividends, prices, reports) |
+| 6-12 | 🟡 | FIFO/tax P&L, charts, packaging, release |
 
-## Current Sprint: Phase 2 to Phase 3 Transition
-**Objective**: Transition from Phase 2 (database layer complete) to Phase 3 (Groww import system).
-
-**This Sprint Goals**:
-1. Verify database schema creation from project root
-2. Create importers/groww.py with CSV parsing
-3. Write PRD.md and Tasks.md documentation ✅
-4. Test the full pipeline: import → calculate → display
-
-**Success Criteria**:
-- Database tables create successfully from project root
-- Groww tradebook CSV can be parsed and stored
-- Holdings are calculated correctly from imported data
-- PRD.md and Tasks.md documents are complete
+## Current Focus
+The app is in daily use as a local portfolio ledger. Recent work: import
+audit tagging (schema v9) with a per-file Remove on the Balance Statement
+page, delete on holdings, and statement-authoritative rebuilds. Next:
+FIFO realized P&L and reports polish.
 
 ## Documentation Index
 - **groww-import.md**: Detailed documentation for the Groww import system
