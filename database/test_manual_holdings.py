@@ -33,13 +33,16 @@ class V5LayerTests(unittest.TestCase):
         db.DB_PATH = self.temp / "scratch.db"
         schema.ensure_schema()
 
-    def test_fresh_database_has_v6_structures(self):
+    def test_fresh_database_has_v7_structures(self):
         connection = sqlite3.connect(db.DB_PATH)
         account_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(accounts)")
         }
         manual_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(manual_holdings)")
+        }
+        bank_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(bank_transactions)")
         }
         tables = {
             row[0] for row in connection.execute(
@@ -53,7 +56,11 @@ class V5LayerTests(unittest.TestCase):
             self.assertIn(detail, account_columns)
         self.assertIn("manual_holdings", tables)
         self.assertIn("source", manual_columns)
-        self.assertEqual(schema.SCHEMA_VERSION, 6)
+        self.assertIn("bank_transactions", tables)
+        for column in ("account_id", "txn_date", "description",
+                       "amount", "balance", "source"):
+            self.assertIn(column, bank_columns)
+        self.assertEqual(schema.SCHEMA_VERSION, 7)
 
     def test_set_account_balance_roundtrip(self):
         broker = find_account_by_name("Main broker")

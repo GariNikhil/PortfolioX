@@ -6,13 +6,14 @@ database, migrates an older rupee-REAL (v1) database in place preserving
 row values by multiplying stored amounts by 100, upgrades a v2 database
 in place with the v3 additions (accounts, prices, account_id), a v3
 database with the v4 additions (account current_balance, manual_holdings),
-a v4 database with the v5 addition (manual_holdings source column), and
-a v5 database with the v6 additions (account detail columns).
+a v4 database with the v5 addition (manual_holdings source column), a
+v5 database with the v6 additions (account detail columns), and a v6
+database with the v7 addition (bank_transactions).
 """
 
 from database.db import transaction
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 # Table definitions. Money columns are INTEGER paise; quantity stays REAL
 # because fractional share counts are legitimate. profit_loss has no
@@ -97,6 +98,25 @@ _TABLES = {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
+    # v7: imported bank-statement transactions. One row per statement
+    # line: amount is SIGNED paise (credit positive, debit negative) and
+    # balance is the running balance after the transaction (always
+    # present in Axis / PNB statements). The UNIQUE constraint makes
+    # re-imports and overlapping statement periods idempotent — the same
+    # statement line cannot be stored twice for one account.
+    "bank_transactions": """
+    CREATE TABLE bank_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL REFERENCES accounts(id),
+        txn_date TEXT NOT NULL,
+        description TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        balance INTEGER NOT NULL,
+        source TEXT NOT NULL DEFAULT 'bank_statement',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (account_id, txn_date, description, amount, balance)
+    )
+    """,
     # v4: hand-entered positions. The holdings cache is rebuilt from
     # transactions, so manual entries need their own table to survive
     # rebuilds; rebuild_holdings() merges them in. account_id is NOT NULL
@@ -146,11 +166,12 @@ def ensure_schema():
     (accounts and prices tables, account_id columns, seeded accounts); a
     v3 database gets the v4 additions (current_balance column,
     manual_holdings table); a v4 database gets the v5 addition
-    (manual_holdings source column); and a v5 database gets the v6
+    (manual_holdings source column); a v5 database gets the v6
     additions (account detail columns: holder name, account number,
-    phone, PAN, UCC). Databases migrated from the pre-account era get
-    their holdings table rebuilt when it still enforces UNIQUE(symbol)
-    instead of UNIQUE(account_id, symbol).
+    phone, PAN, UCC); and a v6 database gets the v7 addition
+    (bank_transactions table). Databases migrated from the pre-account
+    era get their holdings table rebuilt when it still enforces
+    UNIQUE(symbol) instead of UNIQUE(account_id, symbol).
     A migration that hits constraint violations (bad money data) fails
     loudly instead of silently altering values.
     """
@@ -179,6 +200,7 @@ def ensure_schema():
         _upgrade_to_v4(connection)
         _upgrade_to_v5(connection)
         _upgrade_to_v6(connection)
+        _upgrade_to_v7(connection)
         _repair_holdings_unique_constraint(connection)
 
         connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -354,6 +376,24 @@ def _upgrade_to_v6(connection):
             connection.execute(
                 f"ALTER TABLE accounts ADD COLUMN {name} {col_type}"
             )
+
+
+def _upgrade_to_v7(connection):
+    """Add the v7 structure to an existing v6 database, idempotently.
+
+    bank_transactions stores imported bank-statement lines (signed paise
+    amount, running balance) per account, with a UNIQUE constraint that
+    makes overlapping statement periods and re-imports idempotent.
+    """
+
+    existing = {
+        row[0]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        )
+    }
+    if "bank_transactions" not in existing:
+        connection.execute(_TABLES["bank_transactions"])
 
 
 def _is_v1(connection, table):

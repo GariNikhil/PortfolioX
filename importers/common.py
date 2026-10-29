@@ -44,12 +44,16 @@ class ImportResult:
     imported: int = 0
     duplicates: int = 0
     failures: list = field(default_factory=list)
+    notes: list = field(default_factory=list)
 
     def summary(self):
-        return (
+        text = (
             f"{self.filename}: {self.imported} imported, "
             f"{self.duplicates} duplicates, {len(self.failures)} failed rows"
         )
+        for note in self.notes:
+            text += f"\n{note}"
+        return text
 
 
 def normalize_date(value):
@@ -417,7 +421,20 @@ def detect_account(path):
     file carries no details or nothing matches.
     """
 
-    details = extract_account_details(path)
+    return detect_account_from_details(extract_account_details(path))
+
+
+def detect_account_from_details(details):
+    """Match an account-details dict against the stored accounts.
+
+    UCC first (broker-specific), then PAN, then account number;
+    case-insensitive. Returns the matching account row, or None when the
+    details are empty or nothing matches. Used by the tabular importers
+    (via extract_account_details) and by the bank-statement importers,
+    which extract their details from PDF text instead of spreadsheet
+    rows.
+    """
+
     if not details:
         return None
 

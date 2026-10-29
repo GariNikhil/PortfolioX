@@ -127,6 +127,59 @@ class EnsureSchemaTests(unittest.TestCase):
                 """
             )
 
+    def test_bank_transactions_table_and_unique_constraint(self):
+        ensure_schema()
+
+        connection = db.create_connection()
+        try:
+            names = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            self.assertIn("bank_transactions", names)
+
+            # The uniqueness that makes re-imports idempotent.
+            indexes = [
+                [row["name"] for row in connection.execute(
+                    f"PRAGMA index_info({index['name']})"
+                )]
+                for index in connection.execute(
+                    "PRAGMA index_list(bank_transactions)"
+                )
+                if index["unique"] and index["origin"] in ("u", "pk")
+            ]
+            self.assertIn(
+                ["account_id", "txn_date", "description", "amount", "balance"],
+                indexes,
+            )
+        finally:
+            connection.close()
+
+        # A dropped table is recreated by the next ensure_schema (the
+        # upgrade path is structural, so it also covers v6 databases).
+        connection = db.create_connection()
+        try:
+            connection.execute("DROP TABLE bank_transactions")
+            connection.commit()
+        finally:
+            connection.close()
+
+        ensure_schema()
+
+        connection = db.create_connection()
+        try:
+            names = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            self.assertIn("bank_transactions", names)
+        finally:
+            connection.close()
+
     def test_migrates_v1_database_and_multiplies_money_by_100(self):
         connection = db.create_connection()
         try:

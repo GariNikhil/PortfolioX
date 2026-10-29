@@ -1019,5 +1019,101 @@ def get_portfolio_summary(account_id=None):
     }
 
 
+# ------------------------------------------------------- bank transactions #
+
+
+def add_bank_transactions(rows, account_id):
+    """Insert bank-statement transaction lines; skip rows already stored.
+
+    Rows are mappings with txn_date (ISO text), description (non-empty),
+    amount (signed rupees: credit positive, debit negative) and balance
+    (rupees after the transaction). A row identical to one already stored
+    for the account (same date, description, amount and balance) is
+    skipped, so re-imports and overlapping statement periods are
+    idempotent. Returns (imported, duplicates).
+    """
+
+    if find_account_by_id(account_id) is None:
+        raise ValueError(
+            "bank transactions must belong to an existing account"
+        )
+
+    prepared = []
+    for row in rows:
+        txn_date = str(row.get("txn_date") or "").strip()
+        if not txn_date:
+            raise ValueError("every bank transaction needs a date")
+        description = str(row.get("description") or "").strip()
+        if not description:
+            raise ValueError("every bank transaction needs a description")
+        amount = float(row.get("amount") or 0)
+        if amount == 0:
+            raise ValueError(
+                f"bank transaction '{description}' has a zero amount"
+            )
+        balance = float(row.get("balance") or 0)
+        prepared.append((
+            txn_date,
+            description,
+            _to_paise(amount),
+            _to_paise(balance),
+        ))
+
+    existing = {
+        (row["txn_date"], row["description"], row["amount"], row["balance"])
+        for row in get_bank_transactions(account_id=account_id, _raw=True)
+    }
+
+    fresh = [entry for entry in prepared if entry not in existing]
+    with transaction() as connection:
+        connection.executemany(
+            """
+            INSERT INTO bank_transactions (
+                account_id, txn_date, description, amount, balance
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [(account_id, *entry) for entry in fresh],
+        )
+    return len(fresh), len(prepared) - len(fresh)
+
+
+def get_bank_transactions(account_id=None, _raw=False):
+    """Bank transactions, chronological, money in rupees (paise when _raw).
+
+    account_id filters to one account; None means every account. The
+    _raw flag is for internal dedup lookups (values stay paise integers).
+    """
+
+    fragment, params = _account_filter(account_id, "bank_transactions.account_id")
+    query = f"""
+    SELECT bank_transactions.*, accounts.name AS account_name
+    FROM bank_transactions
+    LEFT JOIN accounts ON accounts.id = bank_transactions.account_id
+    {fragment}
+    ORDER BY bank_transactions.txn_date ASC, bank_transactions.id ASC
+    """
+
+    rows = fetch_all(query, params)
+    if _raw:
+        return rows
+    return [
+        _to_rupees(row, ("amount", "balance"))
+        for row in rows
+    ]
+
+
+def count_bank_transactions(account_id=None):
+    """Number of stored bank transactions, optionally for one account."""
+
+    fragment, params = _account_filter(account_id, "account_id")
+    with transaction() as connection:
+        row = connection.execute(
+            f"SELECT COUNT(*) FROM bank_transactions {fragment}",
+            params,
+        ).fetchone()
+    return row[0]
+
+
 if __name__ == "__main__":
     print(get_portfolio_summary())

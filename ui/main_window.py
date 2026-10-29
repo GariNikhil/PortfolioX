@@ -1,6 +1,7 @@
 import customtkinter as ctk
 
 from ui.accounts_page import AccountsPage
+from ui.banking_page import BankingPage
 from ui.dashboard import DashboardPage
 from ui.dividends_page import DividendsPage
 from ui.holdings_hub import HoldingsHubPage
@@ -71,6 +72,7 @@ class PortfolioX(ctk.CTk):
             ("Holdings", HoldingsHubPage),
             ("Prices", PricesPage),
             ("Transactions", TransactionsPage),
+            ("Banking", BankingPage),
             ("Dividends", DividendsPage),
             ("Learn", LearnPage),
             ("Settings", SettingsHubPage),

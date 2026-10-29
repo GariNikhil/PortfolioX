@@ -11,12 +11,14 @@ from pathlib import Path
 
 import customtkinter as ctk
 
+from importers.axis_statement import import_axis_statement
 from importers.contract_note import import_contract_note
 from importers.groww import import_groww_tradebook
 from importers.holding_report import import_holding_report
 from importers.iifl import import_iifl_trade_listing
 from importers.mf_holding_report import import_mf_holding_report
 from importers.pdf_note import import_contract_note_pdf
+from importers.pnb_statement import import_pnb_statement
 from importers.stocksledger import import_stocksledger_portfolio
 from importers.common import detect_account
 from database.backup import backup_database
@@ -24,15 +26,20 @@ from database.manager import get_accounts
 from security.vault import PasswordRequiredError, VaultError, store_password
 from ui.theme import *
 
-# label -> (password kind, callable(path, ...) -> ImportResult, needs_date)
+# label -> (password kind, callable(path, ...) -> ImportResult, needs_date,
+#           auto_creates_account). Bank-statement importers auto-create
+#           their PERSONAL account on first import (after auto-detection
+#           fails), so an unresolved AUTO_DETECT is not an error for them.
 _IMPORTERS = {
-    "Groww tradebook (CSV / XLSX)": ("GROWW_TRADEBOOK", import_groww_tradebook, False),
-    "Contract-note Orders sheet (XLSX)": ("CONTRACT_NOTE_ORDERS", import_contract_note, True),
-    "IIFL Trade Listing (.xls)": ("IIFL_TRADE_LISTING", import_iifl_trade_listing, False),
-    "stocksledger Portfolio (XLSX)": ("STOCKSLEDGER_PORTFOLIO", import_stocksledger_portfolio, False),
-    "Holding report (XLSX / CSV)": ("HOLDING_REPORT", import_holding_report, False),
-    "Mutual fund holdings (XLSX / CSV)": ("MF_HOLDING_REPORT", import_mf_holding_report, False),
-    "Contract-note PDF": ("CONTRACT_NOTE_PDF", import_contract_note_pdf, False),
+    "Groww tradebook (CSV / XLSX)": ("GROWW_TRADEBOOK", import_groww_tradebook, False, False),
+    "Contract-note Orders sheet (XLSX)": ("CONTRACT_NOTE_ORDERS", import_contract_note, True, False),
+    "IIFL Trade Listing (.xls)": ("IIFL_TRADE_LISTING", import_iifl_trade_listing, False, False),
+    "stocksledger Portfolio (XLSX)": ("STOCKSLEDGER_PORTFOLIO", import_stocksledger_portfolio, False, False),
+    "Holding report (XLSX / CSV)": ("HOLDING_REPORT", import_holding_report, False, False),
+    "Mutual fund holdings (XLSX / CSV)": ("MF_HOLDING_REPORT", import_mf_holding_report, False, False),
+    "Contract-note PDF": ("CONTRACT_NOTE_PDF", import_contract_note_pdf, False, False),
+    "Axis Bank statement (PDF)": ("AXIS_STATEMENT", import_axis_statement, False, True),
+    "PNB mPassbook statement (PDF)": ("PNB_MPASSBOOK", import_pnb_statement, False, True),
 }
 
 AUTO_DETECT = "Auto-detect from file"
@@ -131,9 +138,9 @@ class ImportPage(ctk.CTkFrame):
         self.result_box = ctk.CTkTextbox(self, font=("Consolas", 13))
         self.result_box.pack(fill="both", expand=True, padx=PADDING, pady=PADDING)
         self.result_box.insert("0.0",
-                               "Pick a broker file, choose its format, and import.\n"
-                               "Encrypted PDFs ask for their password once - it is\n"
-                               "stored encrypted and never asked again.")
+                               "Pick a broker or bank file, choose its format,\n"
+                               "and import. Encrypted PDFs ask for their password\n"
+                               "once - it is stored encrypted and never asked again.")
 
     def choose_file(self):
         path = tkinter.filedialog.askopenfilename(
@@ -155,7 +162,7 @@ class ImportPage(ctk.CTkFrame):
         choices.extend(account["name"] for account in get_accounts())
         return choices
 
-    def _resolve_account_id(self):
+    def _resolve_account_id(self, allow_unresolved=False):
         """The account for this import, resolved from the dropdown.
 
         'Auto-detect from file' matches the statement's UCC / PAN /
@@ -163,13 +170,17 @@ class ImportPage(ctk.CTkFrame):
         segregate themselves per account); a specific account wins
         outright; 'Unassigned' maps to None. Returns (account_id, note)
         where note explains an auto-detection for the result box, or
-        (None, error) when auto-detection failed.
+        (None, error) when auto-detection failed - unless
+        allow_unresolved (bank-statement importers auto-create their
+        account in that case, so None is handed to them untouched).
         """
 
         choice = self.account_menu.get()
         if choice == AUTO_DETECT:
             account = detect_account(self.file_path)
             if account is None:
+                if allow_unresolved:
+                    return None, None
                 return None, (
                     "Could not identify the account from the file "
                     "(no matching UCC / PAN / a/c no). Pick an account "
@@ -198,9 +209,9 @@ class ImportPage(ctk.CTkFrame):
             return
 
         label = self.source_menu.get()
-        kind, importer, needs_date = _IMPORTERS[label]
+        kind, importer, needs_date, auto_creates = _IMPORTERS[label]
 
-        account_id, note = self._resolve_account_id()
+        account_id, note = self._resolve_account_id(allow_unresolved=auto_creates)
         if note is not None and account_id is None:
             self._report(note, error=True)
             return
@@ -254,12 +265,14 @@ class ImportPage(ctk.CTkFrame):
         try:
             store_password(kind, password.strip())
             label = self.source_menu.get()
-            importer = _IMPORTERS[label][1]
-            account_id, note = self._resolve_account_id()
+            _kind, importer, needs_date, auto_creates = _IMPORTERS[label]
+            account_id, note = self._resolve_account_id(
+                allow_unresolved=auto_creates,
+            )
             if note is not None and account_id is None:
                 self._report(note, error=True)
                 return
-            if _IMPORTERS[label][2]:
+            if needs_date:
                 result = importer(self.file_path, self.date_entry.get().strip(),
                                   account_id=account_id)
             else:
