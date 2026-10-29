@@ -1,5 +1,5 @@
 """Tests for the v4/v5/v6 data layer: balance editing, manual + report
-holdings, and account detail fields."""
+holdings, account detail fields, and the holdings-constraint repair."""
 
 import sqlite3
 import tempfile
@@ -380,6 +380,114 @@ class AccountDetailsTests(unittest.TestCase):
         self.assertEqual(
             fill_account_details_if_empty(99999, pan="AAAAA0000A"), {},
         )
+
+
+class HoldingsConstraintRepairTests(unittest.TestCase):
+    """Databases migrated from the pre-account era can carry a holdings
+    table with UNIQUE(symbol) only; ensure_schema must rebuild it."""
+
+    def setUp(self):
+        self.temp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.temp, ignore_errors=True)
+        db.DB_PATH = self.temp / "stale.db"
+        schema.ensure_schema()
+
+        # Degrade the holdings table to the pre-v3 shape: symbol-only
+        # uniqueness with account_id tacked on by ALTER, exactly like the
+        # live database carried for months.
+        connection = sqlite3.connect(db.DB_PATH)
+        connection.executescript("""
+        CREATE TABLE holdings_old (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT UNIQUE NOT NULL,
+            quantity REAL NOT NULL DEFAULT 0,
+            average_price INTEGER NOT NULL DEFAULT 0,
+            invested_amount INTEGER NOT NULL DEFAULT 0,
+            market_value INTEGER NOT NULL DEFAULT 0,
+            profit_loss INTEGER NOT NULL DEFAULT 0,
+            account_id INTEGER REFERENCES accounts(id)
+        );
+        INSERT INTO holdings_old (symbol, quantity, average_price,
+            invested_amount, market_value, profit_loss)
+        VALUES ('PNB', 20, 6202, 124040, 0, 0);
+        DROP TABLE holdings;
+        ALTER TABLE holdings_old RENAME TO holdings;
+        """)
+        connection.commit()
+        connection.close()
+
+    def _unique_index_columns(self):
+        connection = sqlite3.connect(db.DB_PATH)
+        try:
+            found = []
+            for index in connection.execute("PRAGMA index_list(holdings)"):
+                if not index[2]:  # not unique
+                    continue
+                columns = [
+                    row[2] for row in connection.execute(
+                        f"PRAGMA index_info({index[1]})"
+                    )
+                ]
+                found.append(columns)
+            return found
+        finally:
+            connection.close()
+
+    def test_stale_holdings_table_gets_composite_constraint(self):
+        # Before the repair runs, uniqueness is symbol-only.
+        self.assertIn(["symbol"], self._unique_index_columns())
+
+        schema.ensure_schema()
+
+        self.assertIn(["account_id", "symbol"], self._unique_index_columns())
+        self.assertNotIn(["symbol"], self._unique_index_columns())
+
+    def test_repair_preserves_rows_and_allows_same_symbol_two_accounts(self):
+        connection = sqlite3.connect(db.DB_PATH)
+        connection.execute(
+            "INSERT INTO accounts (name, kind) VALUES ('A', 'BROKER')"
+        )
+        connection.execute(
+            "INSERT INTO accounts (name, kind) VALUES ('B', 'PERSONAL')"
+        )
+        connection.commit()
+        connection.close()
+
+        schema.ensure_schema()
+
+        # Rows survived the rebuild.
+        connection = sqlite3.connect(db.DB_PATH)
+        rows = connection.execute(
+            "SELECT symbol, quantity FROM holdings ORDER BY symbol"
+        ).fetchall()
+        connection.close()
+        self.assertEqual(
+            [(row[0], row[1]) for row in rows], [("PNB", 20.0)],
+        )
+
+        # Two accounts may now hold the same symbol...
+        from database.manager import add_transactions, rebuild_holdings
+        accounts = {row["name"]: row["id"] for row in get_accounts()}
+        add_transactions([{
+            "trade_date": "2026-10-29", "symbol": "PNB",
+            "transaction_type": "BUY", "quantity": 1, "price": 100,
+        }], account_id=accounts["A"])
+        add_transactions([{
+            "trade_date": "2026-10-29", "symbol": "PNB",
+            "transaction_type": "BUY", "quantity": 2, "price": 101,
+        }], account_id=accounts["B"])
+        rebuilt = rebuild_holdings()
+        pnb_rows = [row for row in rebuilt if row.symbol == "PNB"]
+        self.assertEqual(len(pnb_rows), 2)
+        self.assertEqual(
+            {row.account_id for row in pnb_rows},
+            {accounts["A"], accounts["B"]},
+        )
+
+    def test_repair_is_idempotent(self):
+        schema.ensure_schema()
+        schema.ensure_schema()  # must not raise or duplicate anything
+        self.assertIn(["account_id", "symbol"], self._unique_index_columns())
 
 
 class V3ToV4MigrationTests(unittest.TestCase):

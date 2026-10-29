@@ -148,7 +148,9 @@ def ensure_schema():
     manual_holdings table); a v4 database gets the v5 addition
     (manual_holdings source column); and a v5 database gets the v6
     additions (account detail columns: holder name, account number,
-    phone, PAN, UCC).
+    phone, PAN, UCC). Databases migrated from the pre-account era get
+    their holdings table rebuilt when it still enforces UNIQUE(symbol)
+    instead of UNIQUE(account_id, symbol).
     A migration that hits constraint violations (bad money data) fails
     loudly instead of silently altering values.
     """
@@ -177,8 +179,68 @@ def ensure_schema():
         _upgrade_to_v4(connection)
         _upgrade_to_v5(connection)
         _upgrade_to_v6(connection)
+        _repair_holdings_unique_constraint(connection)
 
         connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+
+def _repair_holdings_unique_constraint(connection):
+    """Rebuild a pre-v3 holdings table that still has UNIQUE(symbol) only.
+
+    Databases migrated before accounts existed carry a holdings table
+    whose uniqueness is symbol ALONE (account_id was ALTERed in later,
+    leaving the old constraint in place). With accounts, two accounts can
+    legitimately hold the same symbol, so the constraint must be
+    (account_id, symbol). Detection is via PRAGMA index_list so the
+    repair is idempotent; existing cache rows are preserved (the table is
+    a rebuildable cache, but there is no reason to drop good rows).
+    """
+
+    columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(holdings)")
+    }
+    if "account_id" not in columns:
+        return  # table not created yet; _TABLES DDL is already correct
+
+    composite = False
+    for index in connection.execute("PRAGMA index_list(holdings)"):
+        if not index["unique"] or index["origin"] not in ("u", "pk"):
+            continue
+        indexed = [
+            row["name"]
+            for row in connection.execute(f"PRAGMA index_info({index['name']})")
+        ]
+        if indexed == ["account_id", "symbol"]:
+            composite = True
+            break
+    if composite:
+        return
+
+    connection.execute("""
+    CREATE TABLE holdings_repaired (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER REFERENCES accounts(id),
+        symbol TEXT NOT NULL,
+        quantity REAL NOT NULL DEFAULT 0,
+        average_price INTEGER NOT NULL DEFAULT 0 CHECK (average_price >= 0),
+        invested_amount INTEGER NOT NULL DEFAULT 0 CHECK (invested_amount >= 0),
+        market_value INTEGER NOT NULL DEFAULT 0 CHECK (market_value >= 0),
+        profit_loss INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (account_id, symbol)
+    )
+    """)
+    connection.execute("""
+    INSERT INTO holdings_repaired (
+        account_id, symbol, quantity, average_price,
+        invested_amount, market_value, profit_loss
+    )
+    SELECT account_id, symbol, quantity, average_price,
+           invested_amount, market_value, profit_loss
+    FROM holdings
+    """)
+    connection.execute("DROP TABLE holdings")
+    connection.execute("ALTER TABLE holdings_repaired RENAME TO holdings")
 
 
 def _upgrade_to_v3(connection):
