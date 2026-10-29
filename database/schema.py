@@ -4,13 +4,14 @@ Amount columns are stored as INTEGER paise (1 rupee = 100 paise) so that
 sums stay exact. ensure_schema() creates the current tables on a fresh
 database, migrates an older rupee-REAL (v1) database in place preserving
 row values by multiplying stored amounts by 100, upgrades a v2 database
-in place with the v3 additions (accounts, prices, account_id), and a v3
-database with the v4 additions (account current_balance, manual_holdings).
+in place with the v3 additions (accounts, prices, account_id), a v3
+database with the v4 additions (account current_balance, manual_holdings),
+and a v4 database with the v5 addition (manual_holdings source column).
 """
 
 from database.db import transaction
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 # Table definitions. Money columns are INTEGER paise; quantity stays REAL
 # because fractional share counts are legitimate. profit_loss has no
@@ -94,7 +95,10 @@ _TABLES = {
     # transactions, so manual entries need their own table to survive
     # rebuilds; rebuild_holdings() merges them in. account_id is NOT NULL
     # so the UNIQUE constraint catches duplicates even for a fresh entry
-    # (SQLite treats NULLs as distinct in UNIQUE indexes).
+    # (SQLite treats NULLs as distinct in UNIQUE indexes). v5 adds the
+    # source column: 'manual' rows merge additively into transaction-
+    # derived positions, 'holding_report' rows replace them (the broker
+    # statement is the authoritative current position).
     "manual_holdings": """
     CREATE TABLE manual_holdings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,6 +106,7 @@ _TABLES = {
         symbol TEXT NOT NULL,
         quantity REAL NOT NULL CHECK (quantity > 0),
         average_price INTEGER NOT NULL DEFAULT 0 CHECK (average_price >= 0),
+        source TEXT NOT NULL DEFAULT 'manual',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE (account_id, symbol)
     )
@@ -134,7 +139,8 @@ def ensure_schema():
     dropped (v1 path). A v2 database gets the v3 additions in place
     (accounts and prices tables, account_id columns, seeded accounts); a
     v3 database gets the v4 additions (current_balance column,
-    manual_holdings table).
+    manual_holdings table); a v4 database gets the v5 addition
+    (manual_holdings source column).
     A migration that hits constraint violations (bad money data) fails
     loudly instead of silently altering values.
     """
@@ -161,6 +167,7 @@ def ensure_schema():
 
         _upgrade_to_v3(connection)
         _upgrade_to_v4(connection)
+        _upgrade_to_v5(connection)
 
         connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
@@ -231,6 +238,25 @@ def _upgrade_to_v4(connection):
     }
     if "manual_holdings" not in existing:
         connection.execute(_TABLES["manual_holdings"])
+
+
+def _upgrade_to_v5(connection):
+    """Add the v5 structure to an existing v4 database, idempotently.
+
+    manual_holdings gains a source column distinguishing user-added rows
+    ('manual', merged additively) from imported broker-statement rows
+    ('holding_report', which replace transaction-derived positions).
+    """
+
+    columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(manual_holdings)")
+    }
+    if "source" not in columns:
+        connection.execute(
+            "ALTER TABLE manual_holdings ADD COLUMN source "
+            "TEXT NOT NULL DEFAULT 'manual'"
+        )
 
 
 def _is_v1(connection, table):

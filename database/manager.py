@@ -279,8 +279,9 @@ def rebuild_holdings():
     profit_loss; symbols without a stored price keep them at zero.
 
     Hand-entered positions (manual_holdings) are merged in afterwards:
-    their quantity adds to any transaction-derived position for the same
-    (account, symbol), and unmatched manual symbols become new rows.
+    'manual' rows add their quantity to any transaction-derived position
+    for the same (account, symbol); 'holding_report' rows (imported
+    broker statements) replace the transaction-derived row outright.
     """
 
     groups = {}
@@ -464,13 +465,19 @@ def set_account_balance(account_id, rupees):
 # --------------------------------------------------------- manual holdings #
 
 
-def add_manual_holding(account_id, symbol, quantity, average_price):
+def add_manual_holding(account_id, symbol, quantity, average_price,
+                       source="manual"):
     """Record a hand-entered holding (rupee average price).
 
     Manual rows live in their own table and are merged into the holdings
     cache by rebuild_holdings(), so they survive cache rebuilds. Re-adding
-    the same (account, symbol) replaces the earlier entry.
+    the same (account, symbol) replaces the earlier entry. source decides
+    the merge semantics: 'manual' rows add to transaction-derived
+    positions, 'holding_report' rows replace them.
     """
+
+    if source not in ("manual", "holding_report"):
+        raise ValueError(f"unsupported holding source {source!r}")
 
     symbol = str(symbol or "").strip().upper()
     if not symbol:
@@ -490,14 +497,65 @@ def add_manual_holding(account_id, symbol, quantity, average_price):
     with transaction() as connection:
         connection.execute(
             """
-            INSERT INTO manual_holdings (account_id, symbol, quantity, average_price)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO manual_holdings (account_id, symbol, quantity,
+                                         average_price, source)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(account_id, symbol) DO UPDATE SET
                 quantity = excluded.quantity,
-                average_price = excluded.average_price
+                average_price = excluded.average_price,
+                source = excluded.source
             """,
-            (account_id, symbol, quantity, _to_paise(average_price)),
+            (account_id, symbol, quantity, _to_paise(average_price), source),
         )
+
+
+def replace_holding_report(rows, account_id):
+    """Atomically replace the account's holding-report snapshot rows.
+
+    Deletes every source='holding_report' row for the account before
+    inserting the new snapshot, so a fresher report cannot leave stale
+    symbols behind (a symbol sold since the last report disappears).
+    User-added 'manual' rows for other symbols are untouched; a report
+    row for a manually-added symbol replaces it (the report wins).
+    Rows are mappings with symbol, quantity, average_price (rupees).
+    Returns the number of rows stored.
+    """
+
+    if find_account_by_id(account_id) is None:
+        raise ValueError("holding reports must be assigned to an existing account")
+
+    prepared = []
+    for row in rows:
+        symbol = str(row.get("symbol") or "").strip().upper()
+        if not symbol:
+            raise ValueError("every holding row needs a symbol")
+        quantity = float(row.get("quantity") or 0)
+        if not quantity > 0:
+            raise ValueError(f"quantity for {symbol} must be greater than zero")
+        average_price = float(row.get("average_price") or 0)
+        if average_price < 0:
+            raise ValueError(f"average price for {symbol} cannot be negative")
+        prepared.append((account_id, symbol, quantity, _to_paise(average_price)))
+
+    with transaction() as connection:
+        connection.execute(
+            "DELETE FROM manual_holdings "
+            "WHERE account_id = ? AND source = 'holding_report'",
+            (account_id,),
+        )
+        connection.executemany(
+            """
+            INSERT INTO manual_holdings (account_id, symbol, quantity,
+                                         average_price, source)
+            VALUES (?, ?, ?, ?, 'holding_report')
+            ON CONFLICT(account_id, symbol) DO UPDATE SET
+                quantity = excluded.quantity,
+                average_price = excluded.average_price,
+                source = 'holding_report'
+            """,
+            prepared,
+        )
+    return len(prepared)
 
 
 def get_manual_holdings(account_id=None):
@@ -536,18 +594,25 @@ def delete_manual_holding(manual_id):
 def _merge_manual_holdings(rebuilt, priced):
     """Fold manual_holdings rows into the rebuilt cache; returns the merge.
 
-    Manual quantity adds to any transaction-derived position for the same
-    (account, canonical symbol): invested grows by quantity x average and
-    the average price recomputes weighted. Manual symbols with no
-    transaction history become new rows. Manual symbols are canonicalized
-    like transaction symbols; the manual_holdings table keeps its verbatim
-    symbol.
+    Semantics by source:
+
+    - 'manual': the user added a position by hand, so its quantity adds
+      to any transaction-derived position for the same (account, canonical
+      symbol) — invested grows by quantity x average and the average price
+      recomputes weighted. Unmatched manual symbols become new rows.
+    - 'holding_report': the broker statement is the authoritative CURRENT
+      position, so it replaces the transaction-derived row outright (the
+      report knows about sells the contract notes may not).
+
+    Manual symbols are canonicalized like transaction symbols; the
+    manual_holdings table keeps its verbatim symbol.
     """
 
     by_key = {(row.account_id, row.symbol): row for row in rebuilt}
 
     for manual in fetch_all(
-        "SELECT account_id, symbol, quantity, average_price FROM manual_holdings"
+        "SELECT account_id, symbol, quantity, average_price, source "
+        "FROM manual_holdings"
     ):
         symbol = canonical_symbol(manual["symbol"])
         key = (manual["account_id"], symbol)
@@ -561,6 +626,18 @@ def _merge_manual_holdings(rebuilt, priced):
         else:
             market_value = int(round(quantity * price_paise))
             profit_loss = market_value - invested_paise
+
+        if manual["source"] == "holding_report":
+            by_key[key] = RebuiltHolding(
+                account_id=manual["account_id"],
+                symbol=symbol,
+                quantity=quantity,
+                average_price=manual["average_price"],
+                invested_amount=invested_paise,
+                market_value=market_value,
+                profit_loss=profit_loss,
+            )
+            continue
 
         existing = by_key.get(key)
         if existing is None:

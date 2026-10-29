@@ -13,6 +13,7 @@ import customtkinter as ctk
 
 from importers.contract_note import import_contract_note
 from importers.groww import import_groww_tradebook
+from importers.holding_report import import_holding_report
 from importers.iifl import import_iifl_trade_listing
 from importers.pdf_note import import_contract_note_pdf
 from importers.stocksledger import import_stocksledger_portfolio
@@ -27,6 +28,7 @@ _IMPORTERS = {
     "Contract-note Orders sheet (XLSX)": ("CONTRACT_NOTE_ORDERS", import_contract_note, True),
     "IIFL Trade Listing (.xls)": ("IIFL_TRADE_LISTING", import_iifl_trade_listing, False),
     "stocksledger Portfolio (XLSX)": ("STOCKSLEDGER_PORTFOLIO", import_stocksledger_portfolio, False),
+    "Holding report (XLSX / CSV)": ("HOLDING_REPORT", import_holding_report, False),
     "Contract-note PDF": ("CONTRACT_NOTE_PDF", import_contract_note_pdf, False),
 }
 
