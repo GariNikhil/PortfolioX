@@ -477,6 +477,48 @@ def set_main_account(account_id):
     return find_account_by_id(account_id)
 
 
+def delete_account(account_id):
+    """Delete an account; refuse while rows are still linked to it.
+
+    Returns a counts dict (all zeros on success) like delete_import,
+    None when the account does not exist, and raises ValueError with
+    per-table counts when transactions, bank transactions or manual
+    holdings still reference the account - deleting would silently
+    orphan real financial rows, so the user must move or remove them
+    first.
+    """
+
+    account = find_account_by_id(account_id)
+    if account is None:
+        return None
+
+    with transaction() as connection:
+        counts = {}
+        for table in ("transactions", "bank_transactions", "manual_holdings"):
+            counts[table] = connection.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE account_id = ?",
+                (account_id,),
+            ).fetchone()[0]
+
+        linked = sum(counts.values())
+        if linked:
+            details = ", ".join(
+                f"{count} {label}" for label, count in (
+                    ("transaction(s)", counts["transactions"]),
+                    ("bank row(s)", counts["bank_transactions"]),
+                    ("holding row(s)", counts["manual_holdings"]),
+                ) if count
+            )
+            raise ValueError(
+                f"cannot delete '{account['name']}': it still has {details}. "
+                "Move or remove them first."
+            )
+
+        connection.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
+
+    return counts
+
+
 def set_account_balance(account_id, rupees):
     """Set an account's user-entered current balance; True when it exists.
 

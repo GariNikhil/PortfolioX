@@ -10,8 +10,10 @@ from database import db, schema
 from database.manager import (
     UNASSIGNED,
     add_account,
+    add_bank_transactions,
     add_transactions,
     apply_prices_to_holdings,
+    delete_account,
     find_account_by_name,
     get_accounts,
     get_holdings,
@@ -70,6 +72,47 @@ class V3LayerTests(unittest.TestCase):
 
     def test_set_main_account_missing_id(self):
         self.assertIsNone(set_main_account(99999))
+
+    def test_delete_account_removes_an_empty_account(self):
+        disposable = add_account("Disposable", "PERSONAL")
+
+        counts = delete_account(disposable)
+
+        self.assertEqual(counts["transactions"], 0)
+        self.assertIsNone(find_account_by_name("Disposable"))
+
+    def test_delete_account_refuses_while_transactions_exist(self):
+        broker = find_account_by_name("Main broker")
+        add_transactions(
+            [{
+                "trade_date": "2026-01-05", "symbol": "RELIANCE",
+                "transaction_type": "BUY", "quantity": 10, "price": 2500,
+                "account_id": broker["id"],
+            }],
+            account_id=broker["id"],
+        )
+
+        with self.assertRaises(ValueError) as raised:
+            delete_account(broker["id"])
+
+        self.assertIn("1 transaction(s)", str(raised.exception))
+        self.assertIsNotNone(find_account_by_name("Main broker"))
+
+    def test_delete_account_refuses_while_bank_rows_exist(self):
+        personal = add_account("Empty Bank", "PERSONAL")
+        add_bank_transactions([
+            {"txn_date": "2026-01-05", "description": "UPI",
+             "amount": -100.0, "balance": 900.0},
+        ], personal)
+
+        with self.assertRaises(ValueError) as raised:
+            delete_account(personal)
+
+        self.assertIn("1 bank row(s)", str(raised.exception))
+        self.assertIsNotNone(find_account_by_name("Empty Bank"))
+
+    def test_delete_account_missing_id(self):
+        self.assertIsNone(delete_account(99999))
 
     def test_transactions_can_be_tagged_with_an_account(self):
         broker = find_account_by_name("Main broker")

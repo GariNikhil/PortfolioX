@@ -3,13 +3,20 @@
 The user's model: a main broker account, a main personal account, and the
 option to add more of either kind. Transactions and holdings carry an
 account_id; rows from before accounts existed stay "Unassigned".
+
+Per-row actions: Details opens the inline editor (holder name, a/c no,
+phone, PAN, UCC - and Make main for non-main accounts); Delete removes
+an account, refused while rows are still linked to it.
 """
+
+import tkinter.messagebox
 
 import customtkinter as ctk
 
 from database.manager import (
     UNASSIGNED,
     add_account,
+    delete_account,
     get_accounts,
     get_portfolio_summary,
     set_account_balance,
@@ -78,7 +85,7 @@ class AccountsPage(ctk.CTkFrame):
         for column, width, anchor in (
             ("Name", 240, "w"), ("Kind", 100, "w"),
             ("Transactions", 100, "e"), ("Invested", 130, "e"),
-            ("Balance", 120, "e"), ("Details", 90, "e"),
+            ("Balance", 120, "e"), ("Actions", 180, "e"),
         ):
             ctk.CTkLabel(
                 header,
@@ -164,23 +171,37 @@ class AccountsPage(ctk.CTkFrame):
 
         self._balance_cell(line, account)
 
-        # Make-main button (unless this account already is the main of
-        # its kind - the badge says so): one main broker and one main
-        # personal account.
-        if not account["is_main"]:
-            ctk.CTkButton(
-                line, text="Make main", width=80, height=24,
-                fg_color="transparent", border_width=1,
-                text_color=TEXT,
-                command=lambda: self._make_main_clicked(account),
-            ).pack(side="left", padx=(0, 8))
+        # Actions column: Details opens the inline editor; Delete removes
+        # the account (refused while rows are still linked to it).
+        ctk.CTkButton(
+            line, text="Delete", width=70, height=24,
+            fg_color="transparent", border_width=1,
+            text_color=ERROR,
+            command=lambda: self._delete_clicked(account),
+        ).pack(side="left", padx=(0, 6))
 
-        # Details button in the last column: opens the inline editor for
-        # holder name, a/c no, phone, PAN and UCC.
         ctk.CTkButton(
             line, text="Details", width=80, height=24,
             command=lambda: self._edit_details(line, account),
         ).pack(side="left", padx=(0, 8))
+
+    def _delete_clicked(self, account):
+        text = (
+            f"Delete account '{account['name']}'?\n\n"
+            "This cannot be undone. Deletion is refused while the account "
+            "still has transactions, bank rows or holdings."
+        )
+        if not tkinter.messagebox.askyesno("Delete account", text):
+            return
+
+        try:
+            delete_account(account["id"])
+        except ValueError as error:
+            self._flash(str(error), error=True)
+            return
+
+        self._build_list()
+        self._flash(f"Deleted account '{account['name']}'.")
 
     def _make_main_clicked(self, account):
         updated = set_main_account(account["id"])
@@ -259,7 +280,9 @@ class AccountsPage(ctk.CTkFrame):
 
         Holder name, a/c number, phone, PAN and UCC — filled by hand or
         auto-filled from imported files; Save writes via
-        update_account_details, Cancel restores the plain row.
+        update_account_details, Cancel restores the plain row, and
+        Make main (non-main accounts only) promotes the account here
+        instead of cluttering every row with the button.
         """
 
         for widget in line.winfo_children():
@@ -304,6 +327,16 @@ class AccountsPage(ctk.CTkFrame):
         def cancel_clicked():
             self._build_list()
 
+        def make_main_clicked():
+            if set_main_account(account["id"]) is None:
+                self._flash("Account no longer exists.", error=True)
+                return
+            self._build_list()
+            self._flash(
+                f"'{account['name']}' is now the main "
+                f"{account['kind'].lower()} account."
+            )
+
         ctk.CTkButton(
             buttons, text="Save", width=64, height=24, command=save_clicked,
         ).pack(side="left", padx=(0, 4))
@@ -311,7 +344,17 @@ class AccountsPage(ctk.CTkFrame):
             buttons, text="Cancel", width=64, height=24,
             command=cancel_clicked, fg_color="transparent", border_width=1,
             text_color=TEXT_SECONDARY,
-        ).pack(side="left")
+        ).pack(side="left", padx=(0, 4))
+
+        # Make main lives here (not on the row) so the list stays clean;
+        # the MAIN badge on the row already marks the current main.
+        if not account["is_main"]:
+            ctk.CTkButton(
+                buttons, text="Make main", width=90, height=24,
+                fg_color="transparent", border_width=1,
+                text_color=TEXT,
+                command=make_main_clicked,
+            ).pack(side="left")
 
     def add_account_clicked(self):
         name = self.name_entry.get().strip()
