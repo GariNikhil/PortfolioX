@@ -70,6 +70,40 @@ class BankTransactionTests(unittest.TestCase):
             count_bank_transactions(account_id=self.personal["id"]), 2,
         )
 
+    def test_import_id_tags_fresh_rows_only(self):
+        """The import link lands on inserted rows, never on dup-skips."""
+
+        from database.manager import add_import, delete_import
+
+        rows = [
+            _row("2025-08-18", "UPI/P2M/1/SHOP", -50.0, 950.0),
+            _row("2025-08-19", "UPI/CR/2/REFUND", 2.0, 952.0),
+        ]
+        import_id = add_import("statement.pdf", "AXIS_STATEMENT", "PENDING")
+        add_bank_transactions(
+            rows, account_id=self.personal["id"], import_id=import_id,
+        )
+
+        # A re-import of the same rows under a new audit id inserts
+        # nothing, so the first import keeps its two tagged rows.
+        second_id = add_import("statement.pdf", "AXIS_STATEMENT", "PENDING")
+        imported, duplicates = add_bank_transactions(
+            rows, account_id=self.personal["id"], import_id=second_id,
+        )
+        self.assertEqual((imported, duplicates), (0, 2))
+
+        self.assertEqual(
+            [row["import_id"] for row in
+             get_bank_transactions(account_id=self.personal["id"])],
+            [import_id, import_id],
+        )
+
+        counts = delete_import(import_id)
+        self.assertEqual(counts["bank_transactions"], 2)
+        self.assertEqual(
+            count_bank_transactions(account_id=self.personal["id"]), 0,
+        )
+
     def test_overlapping_period_imports_only_new_rows(self):
         add_bank_transactions(
             [

@@ -10,14 +10,19 @@ from pathlib import Path
 from database import db, schema
 from database.manager import (
     UNASSIGNED,
+    add_bank_transactions,
+    add_import,
     add_manual_holding,
     add_transactions,
     delete_holding,
+    delete_import,
     delete_manual_holding,
     fill_account_details_if_empty,
     find_account_by_name,
     get_accounts,
     get_holdings,
+    get_import_row_counts,
+    get_imports,
     get_manual_holdings,
     get_transactions,
     move_holding,
@@ -38,7 +43,7 @@ class V5LayerTests(unittest.TestCase):
         db.DB_PATH = self.temp / "scratch.db"
         schema.ensure_schema()
 
-    def test_fresh_database_has_v8_structures(self):
+    def test_fresh_database_has_v9_structures(self):
         connection = sqlite3.connect(db.DB_PATH)
         account_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(accounts)")
@@ -48,6 +53,9 @@ class V5LayerTests(unittest.TestCase):
         }
         bank_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(bank_transactions)")
+        }
+        transaction_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(transactions)")
         }
         metadata_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(stock_metadata)")
@@ -72,7 +80,39 @@ class V5LayerTests(unittest.TestCase):
         for column in ("symbol", "sector", "market_cap", "source",
                        "updated_at"):
             self.assertIn(column, metadata_columns)
-        self.assertEqual(schema.SCHEMA_VERSION, 8)
+        # v9: every data table carries the import link column.
+        for columns in (transaction_columns, bank_columns, manual_columns):
+            self.assertIn("import_id", columns)
+        self.assertEqual(schema.SCHEMA_VERSION, 9)
+
+    def test_upgrade_to_v9_adds_import_id_columns(self):
+        """A v8 database (no import_id columns) gains them in place."""
+
+        connection = sqlite3.connect(db.DB_PATH)
+        for table in ("transactions", "bank_transactions", "manual_holdings"):
+            connection.execute(f"ALTER TABLE {table} DROP COLUMN import_id")
+        connection.execute("PRAGMA user_version = 8")
+        connection.commit()
+        connection.close()
+
+        schema.ensure_schema()
+
+        connection = sqlite3.connect(db.DB_PATH)
+        try:
+            for table in ("transactions", "bank_transactions",
+                          "manual_holdings"):
+                columns = {
+                    row[1] for row in connection.execute(
+                        f"PRAGMA table_info({table})"
+                    )
+                }
+                self.assertIn("import_id", columns)
+            self.assertEqual(
+                connection.execute("PRAGMA user_version").fetchone()[0],
+                schema.SCHEMA_VERSION,
+            )
+        finally:
+            connection.close()
 
     def test_set_account_balance_roundtrip(self):
         broker = find_account_by_name("Main broker")
@@ -361,6 +401,71 @@ class V5LayerTests(unittest.TestCase):
             delete_holding(None, "   ")
         # Nothing matches: no error, just zero rows everywhere.
         self.assertEqual(delete_holding(99999, "ITC"), (0, 0))
+
+    # ------------------------------------------------- import tagging #
+
+    def test_import_id_tags_rows_and_delete_import_removes_them(self):
+        """Every importer-inserted row carries its audit id; Remove works."""
+
+        broker = find_account_by_name("Main broker")
+        import_id = add_import("statement.pdf", "CONTRACT_NOTE_PDF", "PENDING")
+
+        add_transactions(
+            [{
+                "trade_date": "2026-01-05", "symbol": "RELIANCE",
+                "transaction_type": "BUY", "quantity": 10, "price": 2500,
+            }],
+            account_id=broker["id"], import_id=import_id,
+        )
+        add_bank_transactions(
+            [{
+                "txn_date": "2026-01-06", "description": "UPI/food",
+                "amount": -250.0, "balance": 1000.0,
+            }],
+            account_id=broker["id"], import_id=import_id,
+        )
+        replace_holding_report(
+            [{"symbol": "ITC", "quantity": 5, "average_price": 400}],
+            account_id=broker["id"], import_id=import_id,
+        )
+
+        # Untagged rows are invisible to the import's counts.
+        add_transactions(
+            [{
+                "trade_date": "2026-01-07", "symbol": "TATASTEEL",
+                "transaction_type": "BUY", "quantity": 1, "price": 100,
+            }],
+            account_id=broker["id"],
+        )
+        self.assertEqual(get_import_row_counts(import_id), {
+            "transactions": 1,
+            "bank_transactions": 1,
+            "manual_holdings": 1,
+        })
+
+        counts = delete_import(import_id)
+        self.assertEqual(counts, {
+            "transactions": 1,
+            "bank_transactions": 1,
+            "manual_holdings": 1,
+            "imports": 1,
+        })
+        self.assertEqual(get_import_row_counts(import_id), {})
+        self.assertEqual(
+            [row["id"] for row in get_imports() if row["id"] == import_id],
+            [],
+        )
+        # Rows imported by other means are untouched.
+        symbols = {row["symbol"] for row in get_transactions()}
+        self.assertEqual(symbols, {"TATASTEEL"})
+
+    def test_delete_import_unknown_id_is_harmless(self):
+        self.assertEqual(delete_import(99999), {
+            "transactions": 0,
+            "bank_transactions": 0,
+            "manual_holdings": 0,
+            "imports": 0,
+        })
 
     # ------------------------------------------ holding-report semantics #
 

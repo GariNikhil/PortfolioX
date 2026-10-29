@@ -67,7 +67,7 @@ class StockMetadataTests(unittest.TestCase):
             set_stock_metadata("   ", sector="X")
 
     def test_v8_schema_version(self):
-        self.assertEqual(SCHEMA_VERSION, 8)
+        self.assertGreaterEqual(SCHEMA_VERSION, 8)
 
 
 class MarketCapCategoryTests(unittest.TestCase):

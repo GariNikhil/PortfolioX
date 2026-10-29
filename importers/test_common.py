@@ -8,6 +8,8 @@ from pathlib import Path
 
 from database.manager import (
     add_transaction,
+    get_imports,
+    get_transactions,
     rebuild_holdings,
     set_symbol_alias,
     update_account_details,
@@ -15,6 +17,7 @@ from database.manager import (
 from importers.common import (
     _split_oversells,
     canonical_trade_symbol,
+    commit_import,
     detect_account,
     existing_trade_keys,
     extract_account_details,
@@ -79,6 +82,40 @@ class TradeKeyTests(ScratchDbTestCase):
         )
 
         self.assertIn(trade_key(_row("VEDANTA")), existing_trade_keys())
+
+
+class CommitImportAuditTests(ScratchDbTestCase):
+    def test_commit_import_tags_rows_and_finalizes_status(self):
+        """Audit-first: rows carry the audit id, status flips to SUCCESS."""
+
+        result = commit_import(
+            "note.pdf", "CONTRACT_NOTE_PDF", [_row("RELIANCE")], [],
+        )
+
+        self.assertEqual(result.imported, 1)
+        audit = [row for row in get_imports()
+                 if row["filename"] == "note.pdf"]
+        self.assertEqual(len(audit), 1)  # one entry, not two
+        self.assertEqual(audit[0]["status"], "SUCCESS")
+        self.assertEqual(
+            [row["import_id"] for row in get_transactions()],
+            [audit[0]["id"]],
+        )
+
+    def test_commit_import_all_duplicates_still_audits_success(self):
+        add_transaction(
+            "2023-07-03", "RELIANCE", None, "NSE", "BUY", 17, 279.10,
+        )
+
+        result = commit_import(
+            "note.pdf", "CONTRACT_NOTE_PDF", [_row("RELIANCE")], [],
+        )
+
+        self.assertEqual((result.imported, result.duplicates), (0, 1))
+        audit = [row for row in get_imports()
+                 if row["filename"] == "note.pdf"]
+        self.assertEqual(len(audit), 1)
+        self.assertEqual(audit[0]["status"], "SUCCESS")
 
 
 class SplitOversellsTests(ScratchDbTestCase):

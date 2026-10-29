@@ -130,13 +130,14 @@ def add_transaction(
         connection.execute(query, params)
 
 
-def add_transactions(rows, account_id=None):
+def add_transactions(rows, account_id=None, import_id=None):
     """Insert many transactions atomically and return the count processed.
 
     Each row is a mapping with add_transaction's keywords (brokerage and
     taxes optional, default zero). account_id tags the whole batch with
-    one account (None leaves it unassigned). The whole batch commits
-    together: a failing row rolls back every row in the batch.
+    one account (None leaves it unassigned) and import_id links the rows
+    to the imports audit entry that produced them. The whole batch
+    commits together: a failing row rolls back every row in the batch.
     """
 
     rows = list(rows)
@@ -160,6 +161,7 @@ def add_transactions(rows, account_id=None):
                 brokerage_paise, taxes_paise,
             ),
             account_id,
+            import_id,
         ))
 
     with transaction() as connection:
@@ -167,9 +169,10 @@ def add_transactions(rows, account_id=None):
             """
             INSERT INTO transactions (
                 trade_date, symbol, isin, exchange, transaction_type,
-                quantity, price, brokerage, taxes, net_amount, account_id
+                quantity, price, brokerage, taxes, net_amount, account_id,
+                import_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             inserts,
         )
@@ -614,7 +617,8 @@ def add_manual_holding(account_id, symbol, quantity, average_price,
         )
 
 
-def replace_holding_report(rows, account_id, source="holding_report"):
+def replace_holding_report(rows, account_id, source="holding_report",
+                           import_id=None):
     """Atomically replace the account's snapshot rows for one source.
 
     Deletes every row of the given source for the account before
@@ -657,14 +661,15 @@ def replace_holding_report(rows, account_id, source="holding_report"):
         connection.executemany(
             """
             INSERT INTO manual_holdings (account_id, symbol, quantity,
-                                         average_price, source)
-            VALUES (?, ?, ?, ?, ?)
+                                         average_price, source, import_id)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(account_id, symbol) DO UPDATE SET
                 quantity = excluded.quantity,
                 average_price = excluded.average_price,
-                source = excluded.source
+                source = excluded.source,
+                import_id = excluded.import_id
             """,
-            [(account_id, symbol, quantity, average_paise, source)
+            [(account_id, symbol, quantity, average_paise, source, import_id)
              for account_id, symbol, quantity, average_paise in prepared],
         )
     return len(prepared)
@@ -1147,7 +1152,13 @@ def get_dividends():
 
 
 def add_import(filename, import_type, status):
-    """Record one import attempt."""
+    """Record one import attempt; returns the audit row's id (or None).
+
+    Importers call this first with a PENDING status, tag their data rows
+    with the returned id, and flip the status via set_import_status()
+    once the batch is committed — so every imported row is linked to the
+    file that brought it in.
+    """
 
     query = """
     INSERT INTO imports (
@@ -1159,7 +1170,62 @@ def add_import(filename, import_type, status):
     """
 
     with transaction() as connection:
-        connection.execute(query, (filename, import_type, status))
+        cursor = connection.execute(query, (filename, import_type, status))
+        return cursor.lastrowid
+
+
+def set_import_status(import_id, status):
+    """Update one import's audit status; None import_id is a no-op."""
+
+    if import_id is None:
+        return
+    with transaction() as connection:
+        connection.execute(
+            "UPDATE imports SET status = ? WHERE id = ?",
+            (status, import_id),
+        )
+
+
+def get_import_row_counts(import_id):
+    """Count the data rows tagged to one import, per table.
+
+    Returns a dict with a count per data table (transactions,
+    bank_transactions, manual_holdings); only tables with at least one
+    tagged row are present, so an empty dict means the import's Remove
+    will only delete the audit entry itself (legacy or dup-skip imports).
+    """
+
+    counts = {}
+    for table in ("transactions", "bank_transactions", "manual_holdings"):
+        rows = fetch_all(
+            f"SELECT COUNT(*) AS n FROM {table} WHERE import_id = ?",
+            (import_id,),
+        )
+        if rows[0]["n"]:
+            counts[table] = rows[0]["n"]
+    return counts
+
+
+def delete_import(import_id):
+    """Remove one import's audit row and every data row it brought in.
+
+    Returns a dict of deleted row counts per data table (transactions,
+    bank_transactions, manual_holdings) plus 'imports' for the audit row
+    itself; the caller rebuilds the holdings cache afterwards.
+    """
+
+    counts = {}
+    with transaction() as connection:
+        for table in ("transactions", "bank_transactions", "manual_holdings"):
+            cursor = connection.execute(
+                f"DELETE FROM {table} WHERE import_id = ?", (import_id,),
+            )
+            counts[table] = cursor.rowcount
+        cursor = connection.execute(
+            "DELETE FROM imports WHERE id = ?", (import_id,),
+        )
+        counts["imports"] = cursor.rowcount
+    return counts
 
 
 def get_imports(import_type=None):
@@ -1225,7 +1291,7 @@ def get_portfolio_summary(account_id=None):
 # ------------------------------------------------------- bank transactions #
 
 
-def add_bank_transactions(rows, account_id):
+def add_bank_transactions(rows, account_id, import_id=None):
     """Insert bank-statement transaction lines; skip rows already stored.
 
     Rows are mappings with txn_date (ISO text), description (non-empty),
@@ -1272,11 +1338,12 @@ def add_bank_transactions(rows, account_id):
         connection.executemany(
             """
             INSERT INTO bank_transactions (
-                account_id, txn_date, description, amount, balance
+                account_id, txn_date, description, amount, balance,
+                import_id
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            [(account_id, *entry) for entry in fresh],
+            [(account_id, *entry, import_id) for entry in fresh],
         )
     return len(fresh), len(prepared) - len(fresh)
 

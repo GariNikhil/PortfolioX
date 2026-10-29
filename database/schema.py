@@ -14,7 +14,7 @@ with the v8 addition (stock_metadata).
 
 from database.db import transaction
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 # Table definitions. Money columns are INTEGER paise; quantity stays REAL
 # because fractional share counts are legitimate. profit_loss has no
@@ -51,6 +51,7 @@ _TABLES = {
         taxes INTEGER NOT NULL DEFAULT 0 CHECK (taxes >= 0),
         net_amount INTEGER NOT NULL DEFAULT 0,
         account_id INTEGER REFERENCES accounts(id),
+        import_id INTEGER REFERENCES imports(id),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
@@ -115,6 +116,7 @@ _TABLES = {
         balance INTEGER NOT NULL,
         source TEXT NOT NULL DEFAULT 'bank_statement',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        import_id INTEGER REFERENCES imports(id),
         UNIQUE (account_id, txn_date, description, amount, balance)
     )
     """,
@@ -149,6 +151,7 @@ _TABLES = {
         average_price INTEGER NOT NULL DEFAULT 0 CHECK (average_price >= 0),
         source TEXT NOT NULL DEFAULT 'manual',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        import_id INTEGER REFERENCES imports(id),
         UNIQUE (account_id, symbol)
     )
     """,
@@ -185,7 +188,9 @@ def ensure_schema():
     additions (account detail columns: holder name, account number,
     phone, PAN, UCC); a v6 database gets the v7 addition
     (bank_transactions table); and a v7 database gets the v8 addition
-    (stock_metadata table). Databases migrated from the pre-account
+    (stock_metadata table); a v8 database gets the v9 additions
+    (import_id link columns on transactions, bank_transactions and
+    manual_holdings). Databases migrated from the pre-account
     era get their holdings table rebuilt when it still enforces
     UNIQUE(symbol) instead of UNIQUE(account_id, symbol).
     A migration that hits constraint violations (bad money data) fails
@@ -218,6 +223,7 @@ def ensure_schema():
         _upgrade_to_v6(connection)
         _upgrade_to_v7(connection)
         _upgrade_to_v8(connection)
+        _upgrade_to_v9(connection)
         _repair_holdings_unique_constraint(connection)
 
         connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -429,6 +435,28 @@ def _upgrade_to_v8(connection):
     }
     if "stock_metadata" not in existing:
         connection.execute(_TABLES["stock_metadata"])
+
+
+def _upgrade_to_v9(connection):
+    """Add the import_id link columns to the data tables (v8 -> v9).
+
+    Every data row an importer inserts is tagged with the audit row that
+    produced it, so the Reports page can show exactly which file brought
+    which rows in and Remove can delete a file's data along with its
+    audit entry. Existing rows keep NULL (legacy imports are not linked
+    unless a backfill assigns them).
+    """
+
+    for table in ("transactions", "bank_transactions", "manual_holdings"):
+        columns = {
+            row["name"]
+            for row in connection.execute(f"PRAGMA table_info({table})")
+        }
+        if "import_id" not in columns:
+            connection.execute(
+                f"ALTER TABLE {table} "
+                "ADD COLUMN import_id INTEGER REFERENCES imports(id)"
+            )
 
 
 def _is_v1(connection, table):

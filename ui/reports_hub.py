@@ -6,6 +6,7 @@ switches the content between reports. Always opens on Demat Report.
 
 import customtkinter as ctk
 
+from ui.balance_statement_page import BalanceStatementPage
 from ui.coming_soon_page import ComingSoonPage
 from ui.dividend_report_page import DividendReportPage
 from ui.import_report_page import ImportReportPage
@@ -14,10 +15,7 @@ from ui.theme import *
 
 TABS = (
     ("Demat Report", lambda parent: ReportsPage(parent)),
-    ("Balance Statement", lambda parent: ComingSoonPage(
-        parent, "Balance Statement",
-        "A balance statement (funds + securities value) will be "
-        "generated from contract notes and holdings.")),
+    ("Balance Statement", lambda parent: BalanceStatementPage(parent)),
     ("Contract Note", lambda parent: ImportReportPage(parent)),
     ("Dividend Report", lambda parent: DividendReportPage(parent)),
     ("US Stocks Report", lambda parent: ComingSoonPage(

@@ -15,7 +15,12 @@ transaction. Both are converted to INTEGER paise by the manager.
 
 from pathlib import Path
 
-from importers.common import ImportFileError, ImportResult, record_import
+from importers.common import (
+    ImportFileError,
+    ImportResult,
+    finish_import,
+    record_import,
+)
 from database import manager
 
 try:
@@ -142,16 +147,20 @@ def import_bank_statement(*, filename, source_kind, rows, failures,
         account = manager.find_account_by_id(new_id)
         created_note = f"Created account '{bank_name}' (PERSONAL)"
 
+    import_id = None
     try:
+        # Audit first so the bank rows can carry the audit row's id; the
+        # status flips to SUCCESS/FAILED once the batch is committed.
+        import_id = record_import(filename, source_kind, "PENDING")
         imported, duplicates = manager.add_bank_transactions(
-            rows, account["id"],
+            rows, account["id"], import_id=import_id,
         )
         if details:
             manager.fill_account_details_if_empty(account["id"], **details)
         if closing_balance is not None:
             manager.set_account_balance(account["id"], closing_balance)
     except Exception as error:
-        record_import(filename, source_kind, f"FAILED ({error})")
+        finish_import(import_id, f"FAILED ({error})")
         raise ImportFileError(f"database rejected the batch: {error}") from error
 
     result = ImportResult(filename=filename, failures=list(failures))
@@ -160,7 +169,7 @@ def import_bank_statement(*, filename, source_kind, rows, failures,
     result.notes.append(f"Account: {account['name']}")
     if created_note:
         result.notes.append(created_note)
-    record_import(filename, source_kind, "SUCCESS")
+    finish_import(import_id, "SUCCESS")
     return result
 
 

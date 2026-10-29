@@ -154,11 +154,26 @@ def existing_trade_keys():
 
 
 def record_import(filename, source_kind, status):
-    """Write the attempt to the imports audit table (never raises)."""
+    """Write the attempt to the imports audit table (never raises).
+
+    Returns the audit row's id so the importer can tag its data rows
+    with it, or None when the audit write failed.
+    """
 
     try:
-        manager.add_import(filename, source_kind, status)
+        return manager.add_import(filename, source_kind, status)
     except Exception:  # the audit trail must not mask the real error
+        return None
+
+
+def finish_import(import_id, status):
+    """Flip a started import's audit status to its final value (never raises)."""
+
+    if import_id is None:
+        return
+    try:
+        manager.set_import_status(import_id, status)
+    except Exception:  # the audit trail must not mask the real result
         pass
 
 
@@ -280,19 +295,25 @@ def commit_import(filename, source_kind, rows, failures, skip_duplicates=True,
             ),
         ))
 
+    # Audit first so the data rows can carry the audit row's id; the
+    # status flips to SUCCESS/FAILED once the batch is committed.
+    import_id = record_import(filename, source_kind, "PENDING")
+
     if not pending:
-        record_import(filename, source_kind, "SUCCESS")
+        finish_import(import_id, "SUCCESS")
         return result
 
     try:
-        manager.add_transactions(pending, account_id=account_id)
+        manager.add_transactions(
+            pending, account_id=account_id, import_id=import_id,
+        )
         manager.rebuild_holdings()
     except Exception as error:  # batch rejected: keep the audit log truthful
-        record_import(filename, source_kind, f"FAILED ({error})")
+        finish_import(import_id, f"FAILED ({error})")
         raise ImportFileError(f"database rejected the batch: {error}") from error
 
     result.imported = len(pending)
-    record_import(filename, source_kind, "SUCCESS")
+    finish_import(import_id, "SUCCESS")
     return result
 
 

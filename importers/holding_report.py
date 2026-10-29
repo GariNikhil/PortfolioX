@@ -37,6 +37,7 @@ from importers.common import (
     RowFailure,
     clean_symbol,
     extract_account_details,
+    finish_import,
     is_blank_row,
     parse_number,
     read_tabular_rows,
@@ -115,8 +116,14 @@ def import_holding_report(path, account_id=None):
             pass
 
     result_failures = list(failures)
+    import_id = None
     try:
-        imported = manager.replace_holding_report(rows, account_id)
+        # Audit first so the snapshot rows can carry the audit row's id;
+        # the status flips to SUCCESS/FAILED once the batch is committed.
+        import_id = record_import(filename, SOURCE_KIND, "PENDING")
+        imported = manager.replace_holding_report(
+            rows, account_id, import_id=import_id,
+        )
         # Seed market prices from the report's closing-price column when
         # present, BEFORE the rebuild so market value and P&L light up.
         for row in rows:
@@ -125,12 +132,12 @@ def import_holding_report(path, account_id=None):
                 manager.set_price(row["symbol"], price, source="holding_report")
         manager.rebuild_holdings()
     except Exception as error:
-        record_import(filename, SOURCE_KIND, f"FAILED ({error})")
+        finish_import(import_id, f"FAILED ({error})")
         raise ImportFileError(f"database rejected the batch: {error}") from error
 
     result = ImportResult(filename=filename, failures=result_failures)
     result.imported = imported
-    record_import(filename, SOURCE_KIND, "SUCCESS")
+    finish_import(import_id, "SUCCESS")
     return result
 
 
