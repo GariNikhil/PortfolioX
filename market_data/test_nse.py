@@ -12,6 +12,7 @@ from market_data.nse import (
     ConsentRequired,
     NseFetchError,
     fetch_nse_prices,
+    is_mutual_fund_scheme,
     nse_symbol,
 )
 
@@ -89,6 +90,24 @@ class SymbolMappingTests(unittest.TestCase):
         self.assertEqual(nse_symbol("RELIANCE POWER L"), "RPOWER")
         self.assertEqual(nse_symbol("PUNJ. NATIONLBAK"), "PNB")
 
+    def test_amc_prefix_display_names_map_to_the_ticker(self):
+        # Fund-house display names from holding reports: the NSE ticker
+        # is the part after 'AMC - '. Mechanical mapping alone would ask
+        # NSE for GROWWAMCGROWWGOLD and get a 403.
+        self.assertEqual(nse_symbol("GROWWAMC - GROWWGOLD"), "GROWWGOLD")
+        self.assertEqual(nse_symbol("GROWWAMC - GROWWSLVR"), "GROWWSLVR")
+        self.assertEqual(nse_symbol("GROWWAMC - GROWWDEFNC"), "GROWWDEFNC")
+
+    def test_mutual_fund_scheme_detection(self):
+        self.assertTrue(
+            is_mutual_fund_scheme("HDFC ELSS TAX SAVER FUND DIRECT PLAN GROWTH")
+        )
+        self.assertTrue(is_mutual_fund_scheme("Some Fund IDCW"))
+        self.assertTrue(is_mutual_fund_scheme("Some Regular Plan"))
+        self.assertFalse(is_mutual_fund_scheme("RELIANCE"))
+        self.assertFalse(is_mutual_fund_scheme("GROWWAMC - GROWWGOLD"))
+        self.assertFalse(is_mutual_fund_scheme(""))
+
     def test_delisted_symbol_maps_to_none(self):
         self.assertIsNone(nse_symbol("VEDANTA"))
 
@@ -117,6 +136,30 @@ class FailureHandlingTests(unittest.TestCase):
 
         self.assertEqual(result["failures"]["VEDANTA"], "cannot map to an NSE symbol")
         self.assertEqual(result["prices"], {})  # RELIANCE 404'd in this fake
+
+    def test_mutual_fund_scheme_skipped_without_a_request(self):
+        transport = FakeTransport({("quote", "GROWWGOLD"): quote(75.2)})
+
+        result = fetch_nse_prices(
+            [
+                "HDFC ELSS TAX SAVER FUND DIRECT PLAN GROWTH",
+                "GROWWAMC - GROWWGOLD",
+            ],
+            lambda: True,
+            transport,
+        )
+
+        # The MF scheme is reported with a friendly reason and the ETF
+        # display name is fetched under its real ticker.
+        self.assertIn(
+            "mutual fund scheme",
+            result["failures"]["HDFC ELSS TAX SAVER FUND DIRECT PLAN GROWTH"],
+        )
+        self.assertEqual(result["prices"], {"GROWWAMC - GROWWGOLD": 75.2})
+        quote_requests = [r for r in transport.requests if "symbol=" in r]
+        self.assertEqual(quote_requests, [
+            "https://www.nseindia.com/api/quote-equity?symbol=GROWWGOLD",
+        ])
 
     def test_transport_exception_reported_per_symbol(self):
         def exploding_transport(url, headers):
@@ -156,17 +199,23 @@ class FailureHandlingTests(unittest.TestCase):
 
 
 class DefaultTransportTests(unittest.TestCase):
-    def test_default_transport_is_urllib_and_gated_by_consent(self):
-        # Patch urllib so even the consented path stays offline in tests.
-        with patch("market_data.nse.urllib.request.urlopen") as fake_open:
-            fake_open.return_value.__enter__.return_value.status = 200
-            fake_open.return_value.__enter__.return_value.read.return_value = (
-                json.dumps(quote(123.45)).encode()
-            )
+    def test_default_transport_is_the_cookie_transport_and_gated(self):
+        # Patch the transport class so the consented default path stays
+        # offline; gating itself is covered by the consent tests above.
+        calls = []
 
+        class StubTransport:
+            def __call__(self, url, headers):
+                calls.append(url)
+                if "symbol=" in url:
+                    return 200, json.dumps(quote(123.45))
+                return 200, ""
+
+        with patch("market_data.nse._UrllibTransport", StubTransport):
             result = fetch_nse_prices(["ITC"], lambda: True)
 
         self.assertEqual(result["prices"], {"ITC": 123.45})
+        self.assertEqual(len(calls), 2)  # warm-up + one quote
 
 
 if __name__ == "__main__":

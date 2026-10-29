@@ -1,8 +1,12 @@
-"""Prices page: manual price entry plus consent-gated NSE fetching.
+"""Prices page: manual price entry plus consent-gated price fetching.
 
-Internet rule: the "Fetch from NSE" button asks for permission with a
-dialog EVERY time it runs; declining does zero network activity (the
-fetcher enforces this too - the dialog is only the first of two gates).
+Internet rule: every network fetch asks for permission with a dialog
+EVERY time it runs; declining does zero network activity (the fetchers
+enforce this too - the dialog is only the first of two gates).
+
+The "Fetch prices" button tries NSE first. Whatever NSE could not fetch
+(mutual-fund schemes excluded - they are not exchange-listed) gets a
+second, separate consent dialog and a retry against Yahoo Finance.
 """
 
 import tkinter.messagebox
@@ -11,6 +15,7 @@ import customtkinter as ctk
 
 from database.manager import get_holdings, get_prices, set_price
 from market_data.nse import ConsentRequired, fetch_nse_prices
+from market_data.yahoo import YahooFetchError, fetch_yahoo_prices
 from ui.formatting import format_quantity, format_rupees
 from ui.theme import *
 
@@ -52,7 +57,7 @@ class PricesPage(ctk.CTkFrame):
 
         ctk.CTkButton(
             actions,
-            text="Fetch from NSE",
+            text="Fetch prices",
             width=160,
             fg_color=WARNING,
             hover_color="#C79100",
@@ -177,7 +182,12 @@ class PricesPage(ctk.CTkFrame):
         self._flash("\n".join(lines))
 
     def fetch_from_nse(self):
-        """Ask permission EVERY time, then fetch quotes for all holdings."""
+        """Ask permission EVERY time, then fetch quotes for all holdings.
+
+        NSE first; whatever it could not fetch (excluding mutual-fund
+        schemes, which are never listed) gets a second, separate consent
+        dialog and a retry against Yahoo Finance.
+        """
 
         symbols = sorted(self._entries)
         if not symbols:
@@ -204,16 +214,53 @@ class PricesPage(ctk.CTkFrame):
             self._flash(f"Fetch failed: {error}", error=True)
             return
 
+        source = "NSE"
+        failures = dict(result["failures"])
+
+        # ---- Yahoo fallback: one more consent, then retry the misses ---- #
+        # Mutual-fund schemes are never listed on an exchange; their
+        # failure is the expected, friendly kind and must not trigger
+        # a pointless second fetch.
+        retry = [
+            symbol for symbol, reason in result["failures"].items()
+            if not reason.startswith("mutual fund")
+        ]
+        if retry:
+            yahoo_granted = tkinter.messagebox.askyesno(
+                "Internet permission required",
+                f"NSE could not fetch {len(retry)} symbol(s).\n\n"
+                "PortfolioX can try Yahoo Finance for them instead "
+                "(one more internet request set).\n\n"
+                "Try Yahoo Finance now?",
+            )
+            if yahoo_granted:
+                try:
+                    yahoo_result = fetch_yahoo_prices(retry, lambda: True)
+                except YahooFetchError as error:
+                    self._flash(f"Yahoo fetch refused: {error}", error=True)
+                    return
+                except Exception as error:
+                    self._flash(f"Yahoo fetch failed: {error}", error=True)
+                    return
+
+                for symbol, price in yahoo_result["prices"].items():
+                    set_price(symbol, price, source="Yahoo")
+                source = "NSE + Yahoo"
+                for symbol, reason in yahoo_result["failures"].items():
+                    failures[symbol] = reason
+                for symbol in yahoo_result["prices"]:
+                    failures.pop(symbol, None)
+
         for symbol, price in result["prices"].items():
             set_price(symbol, price, source="NSE")
 
         self._build_rows()
 
-        lines = [f"Fetched {len(result['prices'])} price(s) from NSE."]
-        if result["failures"]:
+        lines = [f"Fetched {len(result['prices'])} price(s) from {source}."]
+        if failures:
             lines.append("Not fetched:")
             lines.extend(
-                f"  {symbol}: {reason}" for symbol, reason in result["failures"].items()
+                f"  {symbol}: {reason}" for symbol, reason in failures.items()
             )
         self._flash("\n".join(lines))
 

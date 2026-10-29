@@ -12,12 +12,17 @@ symbol. The transport is injectable so tests never touch the real network.
 
 Symbol mapping: stored holding symbols are verbose display names
 ("COAL INDIA LTD", "RELIANCE POWER L"); NSE wants its own trading symbols
-("COALINDIA", "RPOWER"). Mapping is mechanical (strip non-alphanumerics)
-plus an explicit overrides table for the cases mechanical mapping gets
-wrong. Failures are reported per symbol, never raised per symbol - a
-delisted name (VEDANT) must not block the other quotes.
+("COALINDIA", "RPOWER"). Mapping is mechanical (strip non-alphanumerics),
+plus an AMC-prefix rule for fund-house display names ("GROWWAMC -
+GROWWGOLD" -> "GROWWGOLD") and an explicit overrides table for the cases
+neither can get right. Mutual-fund scheme names are skipped outright -
+NSE has no quote for them. Failures are reported per symbol, never
+raised per symbol - a delisted name (VEDANT) must not block the other
+quotes.
 """
 
+import gzip
+import http.cookiejar
 import json
 import re
 import urllib.error
@@ -35,6 +40,7 @@ _HEADERS = {
     ),
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate",
     "Referer": "https://www.nseindia.com/",
 }
 
@@ -49,6 +55,26 @@ SYMBOL_OVERRIDES = {
     "PUNJ. NATIONLBAK": "PNB",
     "TV18BRDCST": "TV18BRDCST",
 }
+
+# Words that mark an AMFI scheme name (a mutual fund, not a listed
+# instrument). NSE's quote API has no entry for these - their price
+# comes from the MF holding report, not the exchange.
+_MF_MARKERS = (
+    " FUND ",        # 'HDFC ELSS TAX SAVER FUND DIRECT PLAN GROWTH'
+    "DIRECT PLAN",
+    "REGULAR PLAN",
+    " DIRECT",
+    " IDCW",
+)
+
+
+def is_mutual_fund_scheme(stored):
+    """True when the stored name is an MF scheme, not an NSE instrument."""
+
+    text = f" {str(stored or '').strip().upper()} "
+    if any(marker in text for marker in _MF_MARKERS):
+        return True
+    return text.strip().endswith((" GROWTH", " IDCW"))
 
 
 class NseFetchError(Exception):
@@ -68,6 +94,11 @@ def nse_symbol(holding_symbol):
 
     if text in SYMBOL_OVERRIDES:
         return SYMBOL_OVERRIDES[text]
+
+    # Fund-house display names carry the AMC as a prefix
+    # ('GROWWAMC - GROWWGOLD'); the NSE ticker is the part after it.
+    if " - " in text:
+        text = text.rsplit(" - ", 1)[1].strip()
 
     # Mechanical mapping: drop everything that is not a letter or digit.
     return re.sub(r"[^A-Z0-9]", "", text) or None
@@ -103,13 +134,22 @@ def fetch_nse_prices(symbols, consent, transport=None):
         )
 
     if transport is None:
-        transport = _urllib_transport
+        transport = _UrllibTransport()  # one cookie jar for the whole fetch
 
     # One cookie warm-up per fetch call, not per symbol.
     transport(NSE_HOME, _HEADERS)
 
     prices, failures = {}, {}
     for stored in symbols:
+        # Mutual-fund schemes are not exchange-listed: skip before any
+        # request instead of getting a confusing 403 from NSE.
+        if is_mutual_fund_scheme(stored):
+            failures[stored] = (
+                "mutual fund scheme - NSE has no quote; "
+                "the price comes from the MF statement"
+            )
+            continue
+
         nse_name = nse_symbol(stored)
         if not nse_name:
             failures[stored] = "cannot map to an NSE symbol"
@@ -141,6 +181,15 @@ def fetch_nse_prices(symbols, consent, transport=None):
     return {"prices": prices, "failures": failures}
 
 
+def _decode(response):
+    """Response body as text, transparently un-gzipping when compressed."""
+
+    raw = response.read()
+    if response.headers.get("Content-Encoding", "").lower() == "gzip":
+        raw = gzip.decompress(raw)
+    return raw.decode("utf-8", "replace")
+
+
 def _extract_price(data):
     """Last-traded price out of one quote-equity payload, or None."""
 
@@ -162,12 +211,26 @@ def _extract_price(data):
     return None
 
 
-def _urllib_transport(url, headers):
-    """Default transport: real urllib. Only reached with consent."""
+class _UrllibTransport:
+    """Default transport: real urllib, keeping cookies between requests.
 
-    request = urllib.request.Request(url, headers=headers)
-    try:
-        with urllib.request.urlopen(request, timeout=15) as response:
-            return response.status, response.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as error:
-        return error.code, error.read().decode("utf-8", "replace")
+    NSE only serves the quote API to requests carrying the cookies its
+    homepage sets, so one instance per fetch call holds a cookie jar:
+    the warm-up request populates it and every quote request reuses it.
+    A stateless transport (fresh opener per request) gets HTTP 403 even
+    for perfectly valid symbols. Only reached with consent.
+    """
+
+    def __init__(self):
+        self._jar = http.cookiejar.CookieJar()
+        self._opener = urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(self._jar)
+        )
+
+    def __call__(self, url, headers):
+        request = urllib.request.Request(url, headers=headers)
+        try:
+            with self._opener.open(request, timeout=15) as response:
+                return response.status, _decode(response)
+        except urllib.error.HTTPError as error:
+            return error.code, _decode(error)
