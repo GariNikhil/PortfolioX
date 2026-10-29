@@ -13,6 +13,7 @@ from database.manager import (
     get_accounts,
     get_portfolio_summary,
     set_account_balance,
+    update_account_details,
 )
 from ui.formatting import format_rupees
 from ui.theme import *
@@ -74,9 +75,9 @@ class AccountsPage(ctk.CTkFrame):
         header = ctk.CTkFrame(self.list_frame, fg_color="transparent")
         header.pack(fill="x", pady=(0, 4))
         for column, width, anchor in (
-            ("Name", 280, "w"), ("Kind", 110, "w"),
-            ("Transactions", 130, "e"), ("Invested", 160, "e"),
-            ("Balance", 150, "e"), ("", 120, "e"),
+            ("Name", 240, "w"), ("Kind", 100, "w"),
+            ("Transactions", 100, "e"), ("Invested", 130, "e"),
+            ("Balance", 120, "e"), ("Details", 90, "e"),
         ):
             ctk.CTkLabel(
                 header,
@@ -107,25 +108,25 @@ class AccountsPage(ctk.CTkFrame):
             ctk.CTkLabel(
                 line, text="Unassigned (imported before accounts)",
                 font=BODY_FONT, text_color=TEXT_SECONDARY,
-                width=280, anchor="w",
+                width=240, anchor="w",
             ).pack(side="left", padx=8)
             ctk.CTkLabel(
                 line, text="-", font=BODY_FONT, text_color=TEXT_SECONDARY,
-                width=110, anchor="w",
+                width=100, anchor="w",
             ).pack(side="left", padx=8)
             ctk.CTkLabel(
                 line, text=str(unassigned["total_transactions"]),
                 font=BODY_FONT, text_color=TEXT,
-                width=130, anchor="e",
+                width=100, anchor="e",
             ).pack(side="left", padx=8)
             ctk.CTkLabel(
                 line, text=format_rupees(unassigned["total_invested"]),
                 font=BODY_FONT, text_color=TEXT,
-                width=160, anchor="e",
+                width=130, anchor="e",
             ).pack(side="left", padx=8)
             ctk.CTkLabel(
                 line, text="-", font=BODY_FONT, text_color=TEXT_SECONDARY,
-                width=150, anchor="e",
+                width=120, anchor="e",
             ).pack(side="left", padx=8)
 
     def _account_row(self, account):
@@ -140,27 +141,34 @@ class AccountsPage(ctk.CTkFrame):
 
         ctk.CTkLabel(
             line, text=f"{name}{badge_text}", font=BODY_FONT, text_color=TEXT,
-            width=280, anchor="w",
+            width=240, anchor="w",
         ).pack(side="left", padx=8)
         ctk.CTkLabel(
             line, text=account["kind"], font=SMALL_FONT,
             text_color=SUCCESS if account["kind"] == "BROKER" else WARNING,
-            width=110, anchor="w",
+            width=100, anchor="w",
         ).pack(side="left", padx=8)
         ctk.CTkLabel(
             line, text=str(account["transaction_count"]),
             font=BODY_FONT, text_color=TEXT,
-            width=130, anchor="e",
+            width=100, anchor="e",
         ).pack(side="left", padx=8)
 
         summary = get_portfolio_summary(account_id=account["id"])
         ctk.CTkLabel(
             line, text=format_rupees(summary["total_invested"]),
             font=BODY_FONT, text_color=TEXT,
-            width=160, anchor="e",
+            width=130, anchor="e",
         ).pack(side="left", padx=8)
 
         self._balance_cell(line, account)
+
+        # Details button in the last column: opens the inline editor for
+        # holder name, a/c no, phone, PAN and UCC.
+        ctk.CTkButton(
+            line, text="Details", width=80, height=24,
+            command=lambda: self._edit_details(line, account),
+        ).pack(side="left", padx=(0, 8))
 
     def _balance_cell(self, line, account):
         """Balance readout + Edit button; Edit swaps in an inline editor."""
@@ -171,10 +179,10 @@ class AccountsPage(ctk.CTkFrame):
         ctk.CTkLabel(
             cell, text=format_rupees(account["current_balance"]),
             font=BODY_FONT, text_color=TEXT,
-            width=150, anchor="e",
+            width=120, anchor="e",
         ).pack(side="left", padx=8)
         ctk.CTkButton(
-            cell, text="Edit", width=60, height=24,
+            cell, text="Edit", width=52, height=24,
             command=lambda: self._edit_balance(cell, account),
         ).pack(side="left", padx=(0, 8))
 
@@ -213,6 +221,74 @@ class AccountsPage(ctk.CTkFrame):
             text_color=TEXT_SECONDARY,
         ).pack(side="left", padx=(0, 8))
         entry.focus_set()
+
+    # Fields of the inline details editor: (accounts column, label, width).
+    _DETAIL_FIELDS = (
+        ("holder_name", "A/C holder name", 220),
+        ("account_number", "A/C number", 160),
+        ("phone", "Phone number", 140),
+        ("pan", "PAN", 140),
+        ("ucc", "Unique Client Code", 160),
+    )
+
+    def _edit_details(self, line, account):
+        """Swap the account row for an editable details form.
+
+        Holder name, a/c number, phone, PAN and UCC — filled by hand or
+        auto-filled from imported files; Save writes via
+        update_account_details, Cancel restores the plain row.
+        """
+
+        for widget in line.winfo_children():
+            widget.destroy()
+
+        entries = {}
+        form = ctk.CTkFrame(line, fg_color="transparent")
+        form.pack(side="left", fill="x", expand=True, padx=8, pady=6)
+
+        for index, (field, label, width) in enumerate(self._DETAIL_FIELDS):
+            row, column = divmod(index, 3)
+            cell = ctk.CTkFrame(form, fg_color="transparent")
+            cell.grid(row=row, column=column, padx=(0, 14), sticky="w")
+
+            ctk.CTkLabel(
+                cell, text=label, font=SMALL_FONT,
+                text_color=TEXT_SECONDARY,
+            ).pack(anchor="w")
+            entry = ctk.CTkEntry(cell, width=width, height=24)
+            # sqlite3.Row has no .get(); keys() covers pre-migration rows.
+            existing = account[field] if field in account.keys() else ""
+            existing = existing or ""
+            if existing:
+                entry.insert(0, existing)
+            entry.pack(anchor="w")
+            entries[field] = entry
+
+        buttons = ctk.CTkFrame(form, fg_color="transparent")
+        buttons.grid(row=1, column=2, sticky="e", padx=(0, 4))
+
+        def save_clicked():
+            values = {
+                field: entry.get().strip()
+                for field, entry in entries.items()
+            }
+            if not update_account_details(account["id"], **values):
+                self._flash("Account no longer exists.", error=True)
+                return
+            self._build_list()
+            self._flash(f"Details for '{account['name']}' saved.")
+
+        def cancel_clicked():
+            self._build_list()
+
+        ctk.CTkButton(
+            buttons, text="Save", width=64, height=24, command=save_clicked,
+        ).pack(side="left", padx=(0, 4))
+        ctk.CTkButton(
+            buttons, text="Cancel", width=64, height=24,
+            command=cancel_clicked, fg_color="transparent", border_width=1,
+            text_color=TEXT_SECONDARY,
+        ).pack(side="left")
 
     def add_account_clicked(self):
         name = self.name_entry.get().strip()

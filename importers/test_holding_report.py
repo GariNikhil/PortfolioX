@@ -11,7 +11,9 @@ from database.manager import (
     add_manual_holding,
     add_transactions,
     find_account_by_name,
+    get_accounts,
     get_holdings,
+    get_prices,
     rebuild_holdings,
 )
 from importers.common import ImportFileError
@@ -229,6 +231,96 @@ class ImportFlowTests(unittest.TestCase):
         rows = get_holdings(account_id=broker["id"])
         self.assertEqual(rows[0]["symbol"], "COAL INDIA LTD")
         self.assertEqual(rows[0]["average_price"], 234.67)
+
+    def test_closing_price_seeds_prices_table(self):
+        broker = find_account_by_name("Main broker")
+        path = write_csv(self.temp / "with_close.csv", [
+            "Symbol,Qty,Average price,Closing price",
+            "PNB,20,62.02,65.50",
+        ])
+
+        import_holding_report(path, account_id=broker["id"])
+
+        prices = {row["symbol"]: row["price"] for row in get_prices()}
+        self.assertEqual(prices["PNB"], 65.50)
+
+    def test_closing_price_bad_value_does_not_fail_the_row(self):
+        broker = find_account_by_name("Main broker")
+        path = write_csv(self.temp / "bad_close.csv", [
+            "Symbol,Qty,Average price,Closing price",
+            "PNB,20,62.02,not-a-number",
+        ])
+
+        result = import_holding_report(path, account_id=broker["id"])
+
+        rows = get_holdings(account_id=broker["id"])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["average_price"], 62.02)
+        self.assertTrue(any("closing price" in f.reason for f in result.failures))
+
+    def test_import_autofills_account_details(self):
+        broker = find_account_by_name("Main broker")
+        path = write_xlsx(self.temp / "groww.xlsx", [
+            ["Name", "Demo Investor"],
+            ["Unique Client Code", "1234567890"],
+            [],
+            ["Stock Name", "ISIN", "Quantity", "Average buy price"],
+            ["PUNJAB NATIONAL BANK", "INE160A01022", 3, "108.04"],
+        ])
+
+        import_holding_report(path, account_id=broker["id"])
+
+        rows = [row for row in get_accounts() if row["id"] == broker["id"]]
+        self.assertEqual(rows[0]["ucc"], "1234567890")
+        self.assertEqual(rows[0]["holder_name"], "Demo Investor")
+
+    def test_import_autofill_never_overwrites_user_data(self):
+        from database.manager import update_account_details
+        broker = find_account_by_name("Main broker")
+        update_account_details(broker["id"], ucc="1111111111")
+
+        detail_path = write_csv(self.temp / "details.csv", [
+            "Unique Client Code,9999999999",
+            "Symbol,Qty,Average price",
+            "PNB,20,62.02",
+        ])
+
+        import_holding_report(detail_path, account_id=broker["id"])
+
+        rows = [row for row in get_accounts() if row["id"] == broker["id"]]
+        self.assertEqual(rows[0]["ucc"], "1111111111")
+
+
+class AccountDetailsExtractionTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.temp, ignore_errors=True)
+
+    def test_label_value_rows_are_extracted(self):
+        path = write_xlsx(self.temp / "header.xlsx", [
+            ["Name", "Demo Investor"],
+            ["Unique Client Code", "1234567890"],
+            ["PAN", "AAAAA0000A"],
+            ["Mobile", "9876543210"],
+            [],
+            ["Stock Name", "Quantity", "Average buy price"],
+        ])
+
+        from importers.holding_report import extract_account_details
+        details = extract_account_details(path)
+
+        self.assertEqual(details, {
+            "holder_name": "Demo Investor",
+            "ucc": "1234567890",
+            "pan": "AAAAA0000A",
+            "phone": "9876543210",
+        })
+
+    def test_unreadable_file_yields_empty_dict(self):
+        from importers.holding_report import extract_account_details
+        self.assertEqual(
+            extract_account_details(self.temp / "missing.xlsx"), {},
+        )
 
 
 if __name__ == "__main__":

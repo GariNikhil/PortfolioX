@@ -462,6 +462,81 @@ def set_account_balance(account_id, rupees):
     return cursor.rowcount > 0
 
 
+# Account detail fields the user can fill by hand or that importers can
+# auto-fill from files (UCC from a broker holdings statement, PAN from a
+# statement header, account number and phone from a bank statement).
+ACCOUNT_DETAIL_FIELDS = ("holder_name", "account_number", "phone", "pan", "ucc")
+
+
+def update_account_details(account_id, holder_name=None, account_number=None,
+                           phone=None, pan=None, ucc=None):
+    """Update account detail fields; only supplied values are changed.
+
+    Each argument maps to one accounts column; pass only the fields you
+    want to change (empty string clears a field). Returns True when the
+    account exists, False otherwise.
+    """
+
+    updates = {
+        "holder_name": holder_name,
+        "account_number": account_number,
+        "phone": phone,
+        "pan": pan,
+        "ucc": ucc,
+    }
+    updates = {
+        name: (str(value).strip() if value is not None else None)
+        for name, value in updates.items()
+        if value is not None
+    }
+    if not updates:
+        return find_account_by_id(account_id) is not None
+
+    set_clause = ", ".join(f"{name} = ?" for name in updates)
+    params = list(updates.values()) + [account_id]
+
+    with transaction() as connection:
+        cursor = connection.execute(
+            f"UPDATE accounts SET {set_clause} WHERE id = ?",
+            params,
+        )
+    return cursor.rowcount > 0
+
+
+def fill_account_details_if_empty(account_id, **fields):
+    """Auto-fill account detail fields that are currently empty.
+
+    Used by importers: a file carries details like a UCC or PAN, and
+    those fill any account field still empty. Fields the user already
+    filled are never overwritten. Returns the dict of fields actually
+    filled.
+    """
+
+    account = find_account_by_id(account_id)
+    if account is None:
+        return {}
+
+    filled = {}
+    updates = {}
+    for name, value in fields.items():
+        if name not in ACCOUNT_DETAIL_FIELDS or value is None:
+            continue
+        value = str(value).strip()
+        if value and not (account[name] or "").strip():
+            updates[name] = value
+            filled[name] = value
+
+    if updates:
+        set_clause = ", ".join(f"{name} = ?" for name in updates)
+        params = list(updates.values()) + [account_id]
+        with transaction() as connection:
+            connection.execute(
+                f"UPDATE accounts SET {set_clause} WHERE id = ?",
+                params,
+            )
+    return filled
+
+
 # --------------------------------------------------------- manual holdings #
 
 

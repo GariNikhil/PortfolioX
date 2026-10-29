@@ -14,14 +14,19 @@ Import semantics:
   sold since the last report disappear instead of lingering.
 - Re-importing is therefore idempotent per account: the latest report
   wins, which is exactly the "avg price as per latest data" rule.
-- No sample file existed when this parser was written, so column
-  detection is keyword-based over common broker header names and should
-  be validated against a real export.
+- No sample file existed when the parser was first written, so column
+  detection is keyword-based over common broker header names; it has
+  since been validated against a real Groww stocks holdings export.
 
 Header detection: a row qualifies when a symbol-ish, a quantity-ish and
 an average-price-ish column are all found. Extra columns (ISIN, P/L,
-LTP, ...) are ignored; blank rows are skipped; bad data rows are
+...) are ignored; blank rows are skipped; bad data rows are
 reported per row instead of aborting the import.
+
+Extras: a closing-price column (if present) seeds the prices table
+with source='holding_report' so market value lights up, and label/value
+rows in the header (UCC, PAN, phone, account number) auto-fill the
+account's detail fields without overwriting anything the user typed.
 """
 
 import csv
@@ -65,6 +70,17 @@ _COLUMN_PATTERNS = {
     ),
 }
 
+# Optional columns: when the report also carries a market/closing price
+# we store it in the prices table so market value and P&L light up
+# immediately. Matched WITHOUT the exclusion list below, since those
+# fragments are exactly what a closing-price column is called.
+_OPTIONAL_COLUMN_PATTERNS = {
+    "closing_price": (
+        "closing price", "close price", "last traded price", "ltp",
+        "market price", "current price", "cmp", "close",
+    ),
+}
+
 # A row qualifies as the header when at least these canonical columns appear.
 _HEADER_MATCH = ("symbol", "quantity", "average_price")
 
@@ -92,9 +108,25 @@ def import_holding_report(path, account_id=None):
         record_import(filename, SOURCE_KIND, f"FAILED ({message})")
         raise ImportFileError(message)
 
+    # Auto-fill account details from label/value rows in the file
+    # (e.g. 'Unique Client Code', '1234567890'). Only fills account
+    # fields the user has not filled themselves.
+    details = extract_account_details(source)
+    if details and account_id is not None:
+        try:
+            manager.fill_account_details_if_empty(account_id, **details)
+        except Exception:  # auto-fill must never block the import
+            pass
+
     result_failures = list(failures)
     try:
         imported = manager.replace_holding_report(rows, account_id)
+        # Seed market prices from the report's closing-price column when
+        # present, BEFORE the rebuild so market value and P&L light up.
+        for row in rows:
+            price = row.get("closing_price")
+            if price is not None:
+                manager.set_price(row["symbol"], price, source="holding_report")
         manager.rebuild_holdings()
     except Exception as error:
         record_import(filename, SOURCE_KIND, f"FAILED ({error})")
@@ -118,16 +150,7 @@ def parse_holding_report(path):
     if not source.exists():
         raise ImportFileError(f"file not found: {source}")
 
-    suffix = source.suffix.lower()
-    if suffix in (".xlsx", ".xlsm"):
-        raw_rows = _read_xlsx(source)
-    elif suffix == ".csv":
-        raw_rows = _read_csv(source)
-    else:
-        raise ImportFileError(
-            f"unsupported holding-report format '{suffix}' "
-            "(expected .xlsx or .csv)"
-        )
+    raw_rows = _read_rows(source)
 
     columns = _locate_header(raw_rows)
     if columns is None:
@@ -139,6 +162,7 @@ def parse_holding_report(path):
     symbol_index = columns["symbol"]
     quantity_index = columns["quantity"]
     price_index = columns["average_price"]
+    closing_index = columns.get("closing_price")
 
     rows, failures = [], []
     for row_number, raw in enumerate(raw_rows, start=1):
@@ -164,11 +188,32 @@ def parse_holding_report(path):
             failures.append(RowFailure(row_number=row_number, reason=str(error)))
             continue
 
-        rows.append({
+        entry = {
             "symbol": symbol,
             "quantity": quantity,
             "average_price": average_price,
-        })
+        }
+
+        # The closing price is auxiliary: a bad value never fails the
+        # holding row, it only skips the price seeding. A None cell is
+        # simply empty, not the string "None".
+        closing_cell = _cell(raw, closing_index) if closing_index is not None else None
+        if closing_cell is not None and str(closing_cell).strip():
+            try:
+                entry["closing_price"] = parse_number(
+                    closing_cell, "closing price",
+                )
+            except ValueError:
+                failures.append(RowFailure(
+                    row_number=row_number,
+                    reason=(
+                        f"{symbol}: invalid closing price "
+                        f"'{str(closing_cell).strip()}' "
+                        "(holding imported without its price)"
+                    ),
+                ))
+
+        rows.append(entry)
 
     return rows, failures
 
@@ -192,7 +237,8 @@ def _locate_header(raw_rows):
     """Find the header row and map canonical columns to cell indexes.
 
     Returns {"header_row": int, "symbol": i, "quantity": i,
-    "average_price": i} or None when no row qualifies.
+    "average_price": i[, "closing_price": i]} or None when no row
+    qualifies. The closing-price column is optional.
     """
 
     for row_number, raw in enumerate(raw_rows, start=1):
@@ -210,10 +256,85 @@ def _locate_header(raw_rows):
                     break
 
         if all(name in columns for name in _HEADER_MATCH):
+            for canonical, patterns in _OPTIONAL_COLUMN_PATTERNS.items():
+                for index, cell in enumerate(normalized):
+                    if not cell:
+                        continue
+                    if any(cell == pattern or pattern in cell for pattern in patterns):
+                        columns[canonical] = index
+                        break
             columns["header_row"] = row_number
             return columns
 
     return None
+
+
+def _read_rows(source):
+    """Dispatch by suffix: raw rows from an .xlsx/.xlsm or .csv file."""
+
+    suffix = source.suffix.lower()
+    if suffix in (".xlsx", ".xlsm"):
+        return _read_xlsx(source)
+    if suffix == ".csv":
+        return _read_csv(source)
+    raise ImportFileError(
+        f"unsupported holding-report format '{suffix}' "
+        "(expected .xlsx or .csv)"
+    )
+
+
+# Label rows that carry account details in statement headers, e.g.
+# ('Unique Client Code', '1234567890') in a Groww stocks holdings file
+# or a PAN line in a bank statement. Keys are lowercased labels with a
+# trailing colon stripped; values are account detail field names.
+_LABEL_MAP = {
+    "name": "holder_name",
+    "account holder": "holder_name",
+    "holder name": "holder_name",
+    "unique client code": "ucc",
+    "ucc": "ucc",
+    "client code": "ucc",
+    "pan": "pan",
+    "pan no": "pan",
+    "pan number": "pan",
+    "mobile": "phone",
+    "mobile no": "phone",
+    "mobile number": "phone",
+    "phone": "phone",
+    "phone number": "phone",
+    "account number": "account_number",
+    "account no": "account_number",
+    "account no.": "account_number",
+    "a/c no": "account_number",
+    "a/c no.": "account_number",
+    "a/c number": "account_number",
+}
+
+
+def extract_account_details(path):
+    """Scan label/value rows of a report for account detail fields.
+
+    Picks up things like ('Unique Client Code', '1234567890') or a PAN
+    line from a statement header. Returns a dict keyed by account detail
+    field names (ucc, pan, phone, account_number), or an empty dict when
+    the file is unreadable or carries no recognizable labels.
+    """
+
+    try:
+        raw_rows = _read_rows(Path(path))
+    except ImportFileError:
+        return {}
+
+    details = {}
+    for row in raw_rows:
+        if len(row) < 2 or row[0] is None:
+            continue
+        label = str(row[0]).strip().lower().rstrip(":")
+        value = str(row[1]).strip() if row[1] is not None else ""
+        field = _LABEL_MAP.get(label)
+        if field and value and field not in details:
+            details[field] = value
+    return details
 
 
 def _read_xlsx(source):

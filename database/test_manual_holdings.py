@@ -1,4 +1,5 @@
-"""Tests for the v4/v5 data layer: balance editing, manual + report holdings."""
+"""Tests for the v4/v5/v6 data layer: balance editing, manual + report
+holdings, and account detail fields."""
 
 import sqlite3
 import tempfile
@@ -11,6 +12,7 @@ from database.manager import (
     add_manual_holding,
     add_transactions,
     delete_manual_holding,
+    fill_account_details_if_empty,
     find_account_by_name,
     get_accounts,
     get_holdings,
@@ -20,6 +22,7 @@ from database.manager import (
     set_account_balance,
     set_price,
     set_symbol_alias,
+    update_account_details,
 )
 
 
@@ -30,7 +33,7 @@ class V5LayerTests(unittest.TestCase):
         db.DB_PATH = self.temp / "scratch.db"
         schema.ensure_schema()
 
-    def test_fresh_database_has_v5_structures(self):
+    def test_fresh_database_has_v6_structures(self):
         connection = sqlite3.connect(db.DB_PATH)
         account_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(accounts)")
@@ -46,9 +49,11 @@ class V5LayerTests(unittest.TestCase):
         connection.close()
 
         self.assertIn("current_balance", account_columns)
+        for detail in ("holder_name", "account_number", "phone", "pan", "ucc"):
+            self.assertIn(detail, account_columns)
         self.assertIn("manual_holdings", tables)
         self.assertIn("source", manual_columns)
-        self.assertEqual(schema.SCHEMA_VERSION, 5)
+        self.assertEqual(schema.SCHEMA_VERSION, 6)
 
     def test_set_account_balance_roundtrip(self):
         broker = find_account_by_name("Main broker")
@@ -299,6 +304,84 @@ class V5LayerTests(unittest.TestCase):
             )
 
 
+class AccountDetailsTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.temp, ignore_errors=True)
+        db.DB_PATH = self.temp / "scratch.db"
+        schema.ensure_schema()
+
+    def _account_row(self, name):
+        rows = [row for row in get_accounts() if row["name"] == name]
+        return rows[0]
+
+    def test_update_account_details_roundtrip(self):
+        update_account_details(
+            self._account_row("Main broker")["id"],
+            holder_name="Demo",
+            account_number="1234567890",
+            pan="AAAAA0000A",
+        )
+        row = self._account_row("Main broker")
+        self.assertEqual(row["holder_name"], "Demo")
+        self.assertEqual(row["account_number"], "1234567890")
+        self.assertEqual(row["pan"], "AAAAA0000A")
+        # Untouched fields stay empty.
+        self.assertEqual(row["phone"] or "", "")
+        self.assertEqual(row["ucc"] or "", "")
+
+    def test_update_account_details_partial_and_clearing(self):
+        account_id = self._account_row("Main broker")["id"]
+        update_account_details(account_id, phone="9876543210", pan="AAAAA0000A")
+
+        # Supplying only one field leaves the others alone.
+        update_account_details(account_id, phone="9999999999")
+        row = self._account_row("Main broker")
+        self.assertEqual(row["phone"], "9999999999")
+        self.assertEqual(row["pan"], "AAAAA0000A")
+
+        # Empty string clears a field.
+        update_account_details(account_id, phone="")
+        row = self._account_row("Main broker")
+        self.assertEqual(row["phone"] or "", "")
+
+    def test_update_account_details_values_are_trimmed(self):
+        account_id = self._account_row("Main personal")["id"]
+        update_account_details(account_id, holder_name="  Nikhil  ")
+        self.assertEqual(self._account_row("Main personal")["holder_name"], "Demo")
+
+    def test_update_account_details_unknown_account(self):
+        self.assertFalse(update_account_details(99999, pan="AAAAA0000A"))
+
+    def test_fill_account_details_fills_empty_only(self):
+        account_id = self._account_row("Main broker")["id"]
+        filled = fill_account_details_if_empty(
+            account_id, ucc="1234567890", pan="AAAAA0000A",
+        )
+        self.assertEqual(filled, {"ucc": "1234567890", "pan": "AAAAA0000A"})
+
+        # A second file with different values must not overwrite.
+        filled = fill_account_details_if_empty(
+            account_id, ucc="0000000000", phone="9876543210",
+        )
+        self.assertEqual(filled, {"phone": "9876543210"})
+        row = self._account_row("Main broker")
+        self.assertEqual(row["ucc"], "1234567890")
+        self.assertEqual(row["phone"], "9876543210")
+
+    def test_fill_account_details_ignores_unknown_fields_and_blanks(self):
+        account_id = self._account_row("Main broker")["id"]
+        filled = fill_account_details_if_empty(
+            account_id, not_a_field="x", pan=None, ucc="   ",
+        )
+        self.assertEqual(filled, {})
+
+    def test_fill_account_details_unknown_account(self):
+        self.assertEqual(
+            fill_account_details_if_empty(99999, pan="AAAAA0000A"), {},
+        )
+
+
 class V3ToV4MigrationTests(unittest.TestCase):
     def setUp(self):
         self.temp = Path(tempfile.mkdtemp())
@@ -510,7 +593,7 @@ class V4ToV5MigrationTests(unittest.TestCase):
         connection = sqlite3.connect(db.DB_PATH)
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         connection.close()
-        self.assertEqual(version, 5)
+        self.assertEqual(version, schema.SCHEMA_VERSION)
 
         # The defaulted rows merge additively, exactly as before v5.
         rebuilt = rebuild_holdings()

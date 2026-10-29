@@ -6,12 +6,13 @@ database, migrates an older rupee-REAL (v1) database in place preserving
 row values by multiplying stored amounts by 100, upgrades a v2 database
 in place with the v3 additions (accounts, prices, account_id), a v3
 database with the v4 additions (account current_balance, manual_holdings),
-and a v4 database with the v5 addition (manual_holdings source column).
+a v4 database with the v5 addition (manual_holdings source column), and
+a v5 database with the v6 additions (account detail columns).
 """
 
 from database.db import transaction
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # Table definitions. Money columns are INTEGER paise; quantity stays REAL
 # because fractional share counts are legitimate. profit_loss has no
@@ -26,6 +27,11 @@ _TABLES = {
         kind TEXT NOT NULL CHECK (kind IN ('BROKER', 'PERSONAL')),
         is_main INTEGER NOT NULL DEFAULT 0 CHECK (is_main IN (0, 1)),
         current_balance INTEGER NOT NULL DEFAULT 0,
+        holder_name TEXT,
+        account_number TEXT,
+        phone TEXT,
+        pan TEXT,
+        ucc TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
@@ -140,7 +146,9 @@ def ensure_schema():
     (accounts and prices tables, account_id columns, seeded accounts); a
     v3 database gets the v4 additions (current_balance column,
     manual_holdings table); a v4 database gets the v5 addition
-    (manual_holdings source column).
+    (manual_holdings source column); and a v5 database gets the v6
+    additions (account detail columns: holder name, account number,
+    phone, PAN, UCC).
     A migration that hits constraint violations (bad money data) fails
     loudly instead of silently altering values.
     """
@@ -168,6 +176,7 @@ def ensure_schema():
         _upgrade_to_v3(connection)
         _upgrade_to_v4(connection)
         _upgrade_to_v5(connection)
+        _upgrade_to_v6(connection)
 
         connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
@@ -257,6 +266,32 @@ def _upgrade_to_v5(connection):
             "ALTER TABLE manual_holdings ADD COLUMN source "
             "TEXT NOT NULL DEFAULT 'manual'"
         )
+
+
+def _upgrade_to_v6(connection):
+    """Add the v6 structures to an existing v5 database, idempotently.
+
+    accounts gains detail columns: holder_name, account_number, phone,
+    pan and ucc. All nullable text, filled by the user on the Accounts
+    page or auto-filled from imported files where the file carries them.
+    """
+
+    wanted = (
+        ("holder_name", "TEXT"),
+        ("account_number", "TEXT"),
+        ("phone", "TEXT"),
+        ("pan", "TEXT"),
+        ("ucc", "TEXT"),
+    )
+    columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(accounts)")
+    }
+    for name, col_type in wanted:
+        if name not in columns:
+            connection.execute(
+                f"ALTER TABLE accounts ADD COLUMN {name} {col_type}"
+            )
 
 
 def _is_v1(connection, table):
