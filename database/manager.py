@@ -445,6 +445,30 @@ def find_account_by_id(account_id):
     return rows[0] if rows else None
 
 
+def set_main_account(account_id):
+    """Mark one account as the main account of its kind.
+
+    One main per kind: marking an account main clears the flag from
+    every other account of the same kind (BROKER or PERSONAL), so
+    there is exactly one main broker and one main personal account.
+    Returns the updated row, or None when the account does not exist.
+    """
+
+    account = find_account_by_id(account_id)
+    if account is None:
+        return None
+    with transaction() as connection:
+        connection.execute(
+            "UPDATE accounts SET is_main = 0 WHERE kind = ?",
+            (account["kind"],),
+        )
+        connection.execute(
+            "UPDATE accounts SET is_main = 1 WHERE id = ?",
+            (account_id,),
+        )
+    return find_account_by_id(account_id)
+
+
 def set_account_balance(account_id, rupees):
     """Set an account's user-entered current balance; True when it exists.
 

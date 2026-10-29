@@ -20,6 +20,7 @@ from database.manager import (
     get_prices_paise,
     get_transactions,
     rebuild_holdings,
+    set_main_account,
     set_price,
 )
 
@@ -49,6 +50,26 @@ class V3LayerTests(unittest.TestCase):
         account_id = add_account("Zerodha", "BROKER")
         self.assertIsNotNone(find_account_by_name("zerodha"))
         self.assertEqual(find_account_by_name("zerodha")["id"], account_id)
+
+    def test_set_main_account_is_one_per_kind(self):
+        second_broker = add_account("Groww", "BROKER")
+
+        # Marking the new broker main clears the seeded broker's flag,
+        # and leaves the personal main untouched.
+        updated = set_main_account(second_broker)
+        self.assertEqual(updated["is_main"], 1)
+        self.assertEqual(find_account_by_name("Main broker")["is_main"], 0)
+        self.assertEqual(find_account_by_name("Main personal")["is_main"], 1)
+
+        # Same for the personal kind, independently.
+        axis = add_account("Axis Bank", "PERSONAL")
+        set_main_account(axis)
+        self.assertEqual(find_account_by_name("Axis Bank")["is_main"], 1)
+        self.assertEqual(find_account_by_name("Main personal")["is_main"], 0)
+        self.assertEqual(find_account_by_name("Groww")["is_main"], 1)
+
+    def test_set_main_account_missing_id(self):
+        self.assertIsNone(set_main_account(99999))
 
     def test_transactions_can_be_tagged_with_an_account(self):
         broker = find_account_by_name("Main broker")

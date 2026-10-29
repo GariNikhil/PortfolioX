@@ -13,6 +13,7 @@ from database.manager import (
     get_accounts,
     get_portfolio_summary,
     set_account_balance,
+    set_main_account,
     update_account_details,
 )
 from ui.formatting import format_rupees
@@ -163,12 +164,34 @@ class AccountsPage(ctk.CTkFrame):
 
         self._balance_cell(line, account)
 
+        # Make-main button (unless this account already is the main of
+        # its kind - the badge says so): one main broker and one main
+        # personal account.
+        if not account["is_main"]:
+            ctk.CTkButton(
+                line, text="Make main", width=80, height=24,
+                fg_color="transparent", border_width=1,
+                text_color=TEXT,
+                command=lambda: self._make_main_clicked(account),
+            ).pack(side="left", padx=(0, 8))
+
         # Details button in the last column: opens the inline editor for
         # holder name, a/c no, phone, PAN and UCC.
         ctk.CTkButton(
             line, text="Details", width=80, height=24,
             command=lambda: self._edit_details(line, account),
         ).pack(side="left", padx=(0, 8))
+
+    def _make_main_clicked(self, account):
+        updated = set_main_account(account["id"])
+        if updated is None:
+            self._flash("Account no longer exists.", error=True)
+            return
+        self._build_list()
+        self._flash(
+            f"'{account['name']}' is now the main "
+            f"{account['kind'].lower()} account."
+        )
 
     def _balance_cell(self, line, account):
         """Balance readout + Edit button; Edit swaps in an inline editor."""
