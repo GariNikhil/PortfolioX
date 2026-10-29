@@ -65,7 +65,7 @@ class HoldingsPage(ctk.CTkFrame):
         self._manual_list()
 
     def _summary_line(self):
-        stocks, _ = split_holdings_by_class(get_holdings(self._account_id))
+        stocks, _, _ = split_holdings_by_class(get_holdings(self._account_id))
         invested = sum(row["invested_amount"] for row in stocks)
         return (
             f"{len(stocks)} stock positions - total invested "
@@ -75,7 +75,7 @@ class HoldingsPage(ctk.CTkFrame):
     def _table(self):
         """Scrollable stocks table, or a friendly empty state."""
 
-        stocks, _ = split_holdings_by_class(get_holdings(self._account_id))
+        stocks, _, _ = split_holdings_by_class(get_holdings(self._account_id))
 
         if not stocks:
             ctk.CTkLabel(

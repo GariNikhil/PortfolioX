@@ -76,19 +76,24 @@ def metadata_allocation(holdings, metadata, classify):
 
 
 def split_holdings_by_class(holdings):
-    """Split holdings into (stocks, funds) tables.
+    """Split holdings into (stocks, fno, funds) tables.
 
-    Funds are locally classified Mutual Fund symbols (the name
-    heuristics in fund_or_fno_label); everything else - plain stocks,
-    ETFs and F&O contracts - stays in the stocks table. Returns two
-    lists in the input order.
+    Funds are locally classified Mutual Fund symbols and F&O contracts
+    are derivatives (the name heuristics in fund_or_fno_label);
+    everything else - plain stocks and ETFs - stays in the stocks
+    table. Returns three lists in the input order.
     """
 
-    stocks, funds = [], []
+    stocks, fno, funds = [], [], []
     for holding in holdings:
         label = fund_or_fno_label(str(holding.get("symbol") or ""))
-        (funds if label == "Mutual Fund" else stocks).append(holding)
-    return stocks, funds
+        if label == "Mutual Fund":
+            funds.append(holding)
+        elif label == "F&O":
+            fno.append(holding)
+        else:
+            stocks.append(holding)
+    return stocks, fno, funds
 
 
 def sector_allocation(holdings, metadata):

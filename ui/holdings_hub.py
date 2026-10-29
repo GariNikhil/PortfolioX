@@ -11,12 +11,14 @@ import customtkinter as ctk
 
 from database.manager import UNASSIGNED, get_accounts
 from ui.coming_soon_page import ComingSoonPage
+from ui.fno_page import FnoPage
 from ui.holdings_page import HoldingsPage
 from ui.mutual_funds_page import MutualFundsPage
 from ui.theme import *
 
 TABS = (
     ("Stocks", lambda parent, account_id=None: HoldingsPage(parent, account_id)),
+    ("F&O", lambda parent, account_id=None: FnoPage(parent, account_id)),
     ("Mutual Funds",
      lambda parent, account_id=None: MutualFundsPage(parent, account_id)),
     ("IPO", lambda parent, account_id=None: ComingSoonPage(
@@ -52,7 +54,7 @@ class HoldingsHubPage(ctk.CTkFrame):
             btn = ctk.CTkButton(
                 bar,
                 text=name,
-                width=150,
+                width=112,
                 height=36,
                 font=SMALL_FONT,
                 corner_radius=18,

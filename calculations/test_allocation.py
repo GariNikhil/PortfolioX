@@ -42,7 +42,7 @@ class AssetAllocationTests(unittest.TestCase):
 
 
 class SplitHoldingsByClassTests(unittest.TestCase):
-    def test_etf_stays_with_stocks_fund_tab_gets_mutual_funds(self):
+    def test_fno_funds_and_stocks_split_three_ways(self):
         holdings = [
             _holding("RELIANCE", 5000.0),
             _holding("BANKNIFTY 45000 CE 2023-07-13", 2500.0),
@@ -51,14 +51,17 @@ class SplitHoldingsByClassTests(unittest.TestCase):
             _holding("VEDANTA", 1000.0),
         ]
 
-        stocks, funds = split_holdings_by_class(holdings)
+        stocks, fno, funds = split_holdings_by_class(holdings)
 
         # ETFs trade like stocks, so they stay in the stocks table;
-        # only mutual funds land in the funds table.
+        # F&O contracts and mutual funds get their own tables.
         self.assertEqual(
             [row["symbol"] for row in stocks],
-            ["RELIANCE", "BANKNIFTY 45000 CE 2023-07-13",
-             "GROWWAMC - GROWWGOLD", "VEDANTA"],
+            ["RELIANCE", "GROWWAMC - GROWWGOLD", "VEDANTA"],
+        )
+        self.assertEqual(
+            [row["symbol"] for row in fno],
+            ["BANKNIFTY 45000 CE 2023-07-13"],
         )
         self.assertEqual(
             [row["symbol"] for row in funds],
@@ -69,16 +72,21 @@ class SplitHoldingsByClassTests(unittest.TestCase):
         holdings = [
             _holding("SBI ELSS TAX SAVER FUND DIRECT GROWTH", 10.0),
             _holding("PNB", 20.0),
+            _holding("NIFTY 19550 PE 27 JUL 2023", 5.0),
         ]
-        stocks, funds = split_holdings_by_class(holdings)
+        stocks, fno, funds = split_holdings_by_class(holdings)
         self.assertEqual([row["symbol"] for row in stocks], ["PNB"])
+        self.assertEqual(
+            [row["symbol"] for row in fno],
+            ["NIFTY 19550 PE 27 JUL 2023"],
+        )
         self.assertEqual(
             [row["symbol"] for row in funds],
             ["SBI ELSS TAX SAVER FUND DIRECT GROWTH"],
         )
 
     def test_empty_holdings(self):
-        self.assertEqual(split_holdings_by_class([]), ([], []))
+        self.assertEqual(split_holdings_by_class([]), ([], [], []))
 
 
 class FinancialYearTests(unittest.TestCase):
