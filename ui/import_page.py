@@ -15,8 +15,10 @@ from importers.contract_note import import_contract_note
 from importers.groww import import_groww_tradebook
 from importers.holding_report import import_holding_report
 from importers.iifl import import_iifl_trade_listing
+from importers.mf_holding_report import import_mf_holding_report
 from importers.pdf_note import import_contract_note_pdf
 from importers.stocksledger import import_stocksledger_portfolio
+from importers.common import detect_account
 from database.backup import backup_database
 from database.manager import get_accounts
 from security.vault import PasswordRequiredError, VaultError, store_password
@@ -29,8 +31,11 @@ _IMPORTERS = {
     "IIFL Trade Listing (.xls)": ("IIFL_TRADE_LISTING", import_iifl_trade_listing, False),
     "stocksledger Portfolio (XLSX)": ("STOCKSLEDGER_PORTFOLIO", import_stocksledger_portfolio, False),
     "Holding report (XLSX / CSV)": ("HOLDING_REPORT", import_holding_report, False),
+    "Mutual fund holdings (XLSX / CSV)": ("MF_HOLDING_REPORT", import_mf_holding_report, False),
     "Contract-note PDF": ("CONTRACT_NOTE_PDF", import_contract_note_pdf, False),
 }
+
+AUTO_DETECT = "Auto-detect from file"
 
 
 class ImportPage(ctk.CTkFrame):
@@ -146,18 +151,38 @@ class ImportPage(ctk.CTkFrame):
     def _account_choices():
         """Dropdown options; 'Unassigned' maps to account_id None."""
 
-        choices = ["Unassigned"]
+        choices = [AUTO_DETECT, "Unassigned"]
         choices.extend(account["name"] for account in get_accounts())
         return choices
 
-    def _selected_account_id(self):
-        """The account chosen in the dropdown, or None for Unassigned."""
+    def _resolve_account_id(self):
+        """The account for this import, resolved from the dropdown.
+
+        'Auto-detect from file' matches the statement's UCC / PAN /
+        account number against the stored accounts (so repeated imports
+        segregate themselves per account); a specific account wins
+        outright; 'Unassigned' maps to None. Returns (account_id, note)
+        where note explains an auto-detection for the result box, or
+        (None, error) when auto-detection failed.
+        """
 
         choice = self.account_menu.get()
+        if choice == AUTO_DETECT:
+            account = detect_account(self.file_path)
+            if account is None:
+                return None, (
+                    "Could not identify the account from the file "
+                    "(no matching UCC / PAN / a/c no). Pick an account "
+                    "manually - the first import fills the account's "
+                    "details from the file, so later imports auto-detect."
+                )
+            return account["id"], f"Account auto-detected: {account['name']}"
+        if choice == "Unassigned":
+            return None, None
         for account in get_accounts():
             if account["name"] == choice:
-                return account["id"]
-        return None
+                return account["id"], None
+        return None, None
 
     def _source_changed(self, choice):
         if _IMPORTERS[choice][2]:
@@ -175,13 +200,17 @@ class ImportPage(ctk.CTkFrame):
         label = self.source_menu.get()
         kind, importer, needs_date = _IMPORTERS[label]
 
+        account_id, note = self._resolve_account_id()
+        if note is not None and account_id is None:
+            self._report(note, error=True)
+            return
+
         # One snapshot per import attempt: a failed attempt that wrote
         # nothing (e.g. cancelled password dialog) leaves it valid for the
         # retry below, so no second backup is needed.
         self.backup_path = backup_database()
 
         try:
-            account_id = self._selected_account_id()
             if needs_date:
                 result = importer(self.file_path, self.date_entry.get().strip(),
                                   account_id=account_id)
@@ -195,6 +224,8 @@ class ImportPage(ctk.CTkFrame):
             return
 
         lines = [result.summary()]
+        if note:
+            lines.append(note)
         if self.backup_path:
             lines.append(f"Pre-import backup: {self.backup_path}")
         if result.failures:
@@ -224,7 +255,10 @@ class ImportPage(ctk.CTkFrame):
             store_password(kind, password.strip())
             label = self.source_menu.get()
             importer = _IMPORTERS[label][1]
-            account_id = self._selected_account_id()
+            account_id, note = self._resolve_account_id()
+            if note is not None and account_id is None:
+                self._report(note, error=True)
+                return
             if _IMPORTERS[label][2]:
                 result = importer(self.file_path, self.date_entry.get().strip(),
                                   account_id=account_id)

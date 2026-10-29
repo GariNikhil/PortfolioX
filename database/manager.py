@@ -548,10 +548,11 @@ def add_manual_holding(account_id, symbol, quantity, average_price,
     cache by rebuild_holdings(), so they survive cache rebuilds. Re-adding
     the same (account, symbol) replaces the earlier entry. source decides
     the merge semantics: 'manual' rows add to transaction-derived
-    positions, 'holding_report' rows replace them.
+    positions, snapshot rows ('holding_report', 'mf_holding_report')
+    replace them.
     """
 
-    if source not in ("manual", "holding_report"):
+    if source not in ("manual", "holding_report", "mf_holding_report"):
         raise ValueError(f"unsupported holding source {source!r}")
 
     symbol = str(symbol or "").strip().upper()
@@ -584,17 +585,23 @@ def add_manual_holding(account_id, symbol, quantity, average_price,
         )
 
 
-def replace_holding_report(rows, account_id):
-    """Atomically replace the account's holding-report snapshot rows.
+def replace_holding_report(rows, account_id, source="holding_report"):
+    """Atomically replace the account's snapshot rows for one source.
 
-    Deletes every source='holding_report' row for the account before
+    Deletes every row of the given source for the account before
     inserting the new snapshot, so a fresher report cannot leave stale
     symbols behind (a symbol sold since the last report disappears).
-    User-added 'manual' rows for other symbols are untouched; a report
-    row for a manually-added symbol replaces it (the report wins).
+    source is 'holding_report' (stock statements) or
+    'mf_holding_report' (mutual-fund statements); the two are replaced
+    independently, so importing one never wipes the other. User-added
+    'manual' rows are untouched; a snapshot row for a manually-added
+    symbol replaces it (the report wins).
     Rows are mappings with symbol, quantity, average_price (rupees).
     Returns the number of rows stored.
     """
+
+    if source not in ("holding_report", "mf_holding_report"):
+        raise ValueError(f"unsupported holding-report source {source!r}")
 
     if find_account_by_id(account_id) is None:
         raise ValueError("holding reports must be assigned to an existing account")
@@ -615,20 +622,21 @@ def replace_holding_report(rows, account_id):
     with transaction() as connection:
         connection.execute(
             "DELETE FROM manual_holdings "
-            "WHERE account_id = ? AND source = 'holding_report'",
-            (account_id,),
+            "WHERE account_id = ? AND source = ?",
+            (account_id, source),
         )
         connection.executemany(
             """
             INSERT INTO manual_holdings (account_id, symbol, quantity,
                                          average_price, source)
-            VALUES (?, ?, ?, ?, 'holding_report')
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(account_id, symbol) DO UPDATE SET
                 quantity = excluded.quantity,
                 average_price = excluded.average_price,
-                source = 'holding_report'
+                source = excluded.source
             """,
-            prepared,
+            [(account_id, symbol, quantity, average_paise, source)
+             for account_id, symbol, quantity, average_paise in prepared],
         )
     return len(prepared)
 
@@ -675,9 +683,10 @@ def _merge_manual_holdings(rebuilt, priced):
       to any transaction-derived position for the same (account, canonical
       symbol) — invested grows by quantity x average and the average price
       recomputes weighted. Unmatched manual symbols become new rows.
-    - 'holding_report': the broker statement is the authoritative CURRENT
-      position, so it replaces the transaction-derived row outright (the
-      report knows about sells the contract notes may not).
+    - snapshot sources ('holding_report', 'mf_holding_report'): the
+      statement is the authoritative CURRENT position, so it replaces the
+      transaction-derived row outright (the report knows about sells the
+      contract notes may not).
 
     Manual symbols are canonicalized like transaction symbols; the
     manual_holdings table keeps its verbatim symbol.
@@ -702,7 +711,7 @@ def _merge_manual_holdings(rebuilt, priced):
             market_value = int(round(quantity * price_paise))
             profit_loss = market_value - invested_paise
 
-        if manual["source"] == "holding_report":
+        if manual["source"] != "manual":
             by_key[key] = RebuiltHolding(
                 account_id=manual["account_id"],
                 symbol=symbol,

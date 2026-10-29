@@ -9,9 +9,15 @@ import math
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from pathlib import Path
 
 from calculations.fno import normalize_fno_symbol
 from database import manager
+
+try:
+    import openpyxl
+except ImportError:  # pragma: no cover - only hit without the openpyxl extra
+    openpyxl = None
 
 DATE_FORMATS = ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d %b %Y", "%d %B %Y")
 
@@ -284,3 +290,144 @@ def commit_import(filename, source_kind, rows, failures, skip_duplicates=True,
     result.imported = len(pending)
     record_import(filename, source_kind, "SUCCESS")
     return result
+
+
+# ------------------------------------------------------- tabular reading #
+
+
+def read_tabular_rows(source):
+    """Dispatch by suffix: raw rows from an .xlsx/.xlsm or .csv file.
+
+    Shared by every spreadsheet-shaped importer (holding reports, mutual
+    fund statements, ...). Raises ImportFileError for unsupported
+    extensions and unreadable files.
+    """
+
+    source = Path(source)
+    suffix = source.suffix.lower()
+    if suffix in (".xlsx", ".xlsm"):
+        return _read_xlsx(source)
+    if suffix == ".csv":
+        return _read_csv(source)
+    raise ImportFileError(
+        f"unsupported format '{suffix}' (expected .xlsx or .csv)"
+    )
+
+
+def _read_xlsx(source):
+    """All cell rows of the first worksheet, or an ImportFileError."""
+
+    if openpyxl is None:
+        raise ImportFileError("openpyxl is not installed - cannot read .xlsx")
+
+    try:
+        workbook = openpyxl.load_workbook(source, data_only=True, read_only=True)
+    except Exception as error:
+        raise ImportFileError(f"cannot open workbook: {error}") from error
+
+    try:
+        sheet = workbook.worksheets[0]
+        return [list(row) for row in sheet.iter_rows(values_only=True)]
+    finally:
+        workbook.close()
+
+
+def _read_csv(source):
+    """All rows of a CSV file, tolerating comma/semicolon/tab delimiters."""
+
+    import csv
+
+    try:
+        text = source.read_text(encoding="utf-8-sig", errors="replace")
+    except OSError as error:
+        raise ImportFileError(f"cannot read file: {error}") from error
+
+    sample = text[:4096]
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
+    except csv.Error:
+        dialect = csv.excel  # plain comma default
+
+    return [row for row in csv.reader(text.splitlines(), dialect)]
+
+
+# ------------------------------------------------- account detail labels #
+
+# Label rows that carry account details in statement headers, e.g.
+# ('Unique Client Code', '1234567890') in a Groww stocks holdings file,
+# ('Mobile Number', ...) or ('PAN', ...) in a Groww MF statement, or a
+# PAN line in a bank statement. Keys are lowercased labels with a
+# trailing colon stripped; values are accounts-table detail fields.
+ACCOUNT_DETAIL_LABELS = {
+    "name": "holder_name",
+    "account holder": "holder_name",
+    "holder name": "holder_name",
+    "unique client code": "ucc",
+    "ucc": "ucc",
+    "client code": "ucc",
+    "pan": "pan",
+    "pan no": "pan",
+    "pan number": "pan",
+    "mobile": "phone",
+    "mobile no": "phone",
+    "mobile number": "phone",
+    "phone": "phone",
+    "phone number": "phone",
+    "account number": "account_number",
+    "account no": "account_number",
+    "account no.": "account_number",
+    "a/c no": "account_number",
+    "a/c no.": "account_number",
+    "a/c number": "account_number",
+}
+
+
+def extract_account_details(path):
+    """Scan label/value rows of a statement for account detail fields.
+
+    Picks up things like ('Unique Client Code', '1234567890') or a PAN
+    line from a statement header. Returns a dict keyed by account detail
+    field names (holder_name, ucc, pan, phone, account_number), or an
+    empty dict when the file is unreadable or carries no labels.
+    """
+
+    try:
+        raw_rows = read_tabular_rows(Path(path))
+    except ImportFileError:
+        return {}
+
+    details = {}
+    for row in raw_rows:
+        if len(row) < 2 or row[0] is None:
+            continue
+        label = str(row[0]).strip().lower().rstrip(":")
+        value = str(row[1]).strip() if row[1] is not None else ""
+        field_name = ACCOUNT_DETAIL_LABELS.get(label)
+        if field_name and value and field_name not in details:
+            details[field_name] = value
+    return details
+
+
+def detect_account(path):
+    """Identify which account a statement belongs to, from its details.
+
+    Extracts account details from the file, then matches them against
+    the stored accounts: UCC first (broker-specific), then PAN, then
+    account number. Returns the matching account row, or None when the
+    file carries no details or nothing matches.
+    """
+
+    details = extract_account_details(path)
+    if not details:
+        return None
+
+    for field_name in ("ucc", "pan", "account_number"):
+        value = details.get(field_name)
+        if not value:
+            continue
+        for account in manager.get_accounts():
+            stored = (account[field_name] or "").strip()
+            if stored and stored.upper() == value.upper():
+                return account
+
+    return None

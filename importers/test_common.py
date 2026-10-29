@@ -1,12 +1,23 @@
-"""Tests for the shared importer helpers (dedup-key canonicalization)."""
+"""Tests for the shared importer helpers (dedup-key canonicalization,
+account-detail extraction, account auto-detection)."""
 
+import shutil
+import tempfile
 import unittest
+from pathlib import Path
 
-from database.manager import add_transaction, rebuild_holdings, set_symbol_alias
+from database.manager import (
+    add_transaction,
+    rebuild_holdings,
+    set_symbol_alias,
+    update_account_details,
+)
 from importers.common import (
     _split_oversells,
     canonical_trade_symbol,
+    detect_account,
     existing_trade_keys,
+    extract_account_details,
     trade_key,
 )
 from importers.support import ScratchDbTestCase
@@ -121,6 +132,110 @@ class SplitOversellsTests(ScratchDbTestCase):
         row, held = oversells[0]
         self.assertEqual(row["symbol"], "RELIANCE")
         self.assertEqual(held, 0.0)
+
+
+class AccountDetailExtractionTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.temp, ignore_errors=True)
+
+    def _write_xlsx(self, name, rows):
+        import openpyxl
+
+        path = self.temp / name
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        for row in rows:
+            sheet.append(row)
+        workbook.save(path)
+        workbook.close()
+        return path
+
+    def test_groww_stocks_labels(self):
+        path = self._write_xlsx("stocks.xlsx", [
+            ["Name", "Demo Investor"],
+            ["Unique Client Code", "1234567890"],
+            [],
+            ["Stock Name", "Quantity", "Average buy price"],
+        ])
+
+        self.assertEqual(extract_account_details(path), {
+            "holder_name": "Demo Investor",
+            "ucc": "1234567890",
+        })
+
+    def test_groww_mf_labels(self):
+        path = self._write_xlsx("mf.xlsx", [
+            ["Personal Details"],
+            ["Name", "Demo Investor"],
+            ["Mobile Number", "9000000000"],
+            ["PAN", "AAAAA0000A"],
+            [],
+            ["Scheme Name", "Units", "Invested Value"],
+        ])
+
+        self.assertEqual(extract_account_details(path), {
+            "holder_name": "Demo Investor",
+            "phone": "9000000000",
+            "pan": "AAAAA0000A",
+        })
+
+    def test_unreadable_file_yields_empty_dict(self):
+        self.assertEqual(
+            extract_account_details(self.temp / "missing.xlsx"), {},
+        )
+
+
+class DetectAccountTests(ScratchDbTestCase):
+    def _write_xlsx(self, name, rows):
+        import openpyxl
+
+        path = Path(self.temporary_directory.name) / name
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        for row in rows:
+            sheet.append(row)
+        workbook.save(path)
+        workbook.close()
+        return path
+
+    def test_ucc_match_identifies_the_account(self):
+        from database.manager import get_accounts
+        broker = [row for row in get_accounts()
+                  if row["name"] == "Main broker"][0]
+        update_account_details(broker["id"], ucc="1234567890")
+
+        path = self._write_xlsx("stmt.xlsx", [
+            ["Unique Client Code", "1234567890"],
+            ["Stock Name", "Quantity", "Average buy price"],
+        ])
+
+        self.assertEqual(detect_account(path)["id"], broker["id"])
+
+    def test_pan_match_identifies_the_account(self):
+        from database.manager import get_accounts
+        personal = [row for row in get_accounts()
+                    if row["name"] == "Main personal"][0]
+        update_account_details(personal["id"], pan="AAAAA0000A")
+
+        path = self._write_xlsx("stmt.xlsx", [
+            ["PAN", "aaaaa0000a"],  # case-insensitive match
+            ["Scheme Name", "Units", "Invested Value"],
+        ])
+
+        self.assertEqual(detect_account(path)["id"], personal["id"])
+
+    def test_no_details_or_no_match_returns_none(self):
+        path = self._write_xlsx("plain.xlsx", [
+            ["Stock Name", "Quantity", "Average buy price"],
+        ])
+        self.assertIsNone(detect_account(path))
+
+        path = self._write_xlsx("unknown.xlsx", [
+            ["Unique Client Code", "0000000000"],
+            ["Stock Name", "Quantity", "Average buy price"],
+        ])
+        self.assertIsNone(detect_account(path))
 
 
 if __name__ == "__main__":

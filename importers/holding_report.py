@@ -29,7 +29,6 @@ rows in the header (UCC, PAN, phone, account number) auto-fill the
 account's detail fields without overwriting anything the user typed.
 """
 
-import csv
 from pathlib import Path
 
 from importers.common import (
@@ -37,16 +36,13 @@ from importers.common import (
     ImportResult,
     RowFailure,
     clean_symbol,
+    extract_account_details,
     is_blank_row,
     parse_number,
+    read_tabular_rows,
     record_import,
 )
 from database import manager
-
-try:
-    import openpyxl
-except ImportError:  # pragma: no cover - only hit without the openpyxl extra
-    openpyxl = None
 
 SOURCE_KIND = "HOLDING_REPORT"
 
@@ -269,104 +265,7 @@ def _locate_header(raw_rows):
     return None
 
 
-def _read_rows(source):
-    """Dispatch by suffix: raw rows from an .xlsx/.xlsm or .csv file."""
-
-    suffix = source.suffix.lower()
-    if suffix in (".xlsx", ".xlsm"):
-        return _read_xlsx(source)
-    if suffix == ".csv":
-        return _read_csv(source)
-    raise ImportFileError(
-        f"unsupported holding-report format '{suffix}' "
-        "(expected .xlsx or .csv)"
-    )
-
-
-# Label rows that carry account details in statement headers, e.g.
-# ('Unique Client Code', '1234567890') in a Groww stocks holdings file
-# or a PAN line in a bank statement. Keys are lowercased labels with a
-# trailing colon stripped; values are account detail field names.
-_LABEL_MAP = {
-    "name": "holder_name",
-    "account holder": "holder_name",
-    "holder name": "holder_name",
-    "unique client code": "ucc",
-    "ucc": "ucc",
-    "client code": "ucc",
-    "pan": "pan",
-    "pan no": "pan",
-    "pan number": "pan",
-    "mobile": "phone",
-    "mobile no": "phone",
-    "mobile number": "phone",
-    "phone": "phone",
-    "phone number": "phone",
-    "account number": "account_number",
-    "account no": "account_number",
-    "account no.": "account_number",
-    "a/c no": "account_number",
-    "a/c no.": "account_number",
-    "a/c number": "account_number",
-}
-
-
-def extract_account_details(path):
-    """Scan label/value rows of a report for account detail fields.
-
-    Picks up things like ('Unique Client Code', '1234567890') or a PAN
-    line from a statement header. Returns a dict keyed by account detail
-    field names (ucc, pan, phone, account_number), or an empty dict when
-    the file is unreadable or carries no recognizable labels.
-    """
-
-    try:
-        raw_rows = _read_rows(Path(path))
-    except ImportFileError:
-        return {}
-
-    details = {}
-    for row in raw_rows:
-        if len(row) < 2 or row[0] is None:
-            continue
-        label = str(row[0]).strip().lower().rstrip(":")
-        value = str(row[1]).strip() if row[1] is not None else ""
-        field = _LABEL_MAP.get(label)
-        if field and value and field not in details:
-            details[field] = value
-    return details
-
-
-def _read_xlsx(source):
-    """All cell rows of the first worksheet, or an ImportFileError."""
-
-    if openpyxl is None:
-        raise ImportFileError("openpyxl is not installed - cannot read .xlsx")
-
-    try:
-        workbook = openpyxl.load_workbook(source, data_only=True, read_only=True)
-    except Exception as error:
-        raise ImportFileError(f"cannot open workbook: {error}") from error
-
-    try:
-        sheet = workbook.worksheets[0]
-        return [list(row) for row in sheet.iter_rows(values_only=True)]
-    finally:
-        workbook.close()
-
-
-def _read_csv(source):
-    """All rows of a CSV file, tolerating comma/semicolon/tab delimiters."""
-
-    try:
-        text = source.read_text(encoding="utf-8-sig", errors="replace")
-    except OSError as error:
-        raise ImportFileError(f"cannot read file: {error}") from error
-
-    sample = text[:4096]
-    try:
-        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
-    except csv.Error:
-        dialect = csv.excel  # plain comma default
-
-    return [row for row in csv.reader(text.splitlines(), dialect)]
+# Shared implementations live in importers.common so the mutual-fund
+# importer (and future statement importers) reuse them; the names stay
+# importable from this module for backwards compatibility.
+_read_rows = read_tabular_rows

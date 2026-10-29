@@ -190,6 +190,65 @@ class V5LayerTests(unittest.TestCase):
 
     # ------------------------------------------ holding-report semantics #
 
+    def test_mf_report_and_stock_report_replace_independently(self):
+        """Importing one snapshot source never wipes the other's rows."""
+
+        broker = find_account_by_name("Main broker")
+        replace_holding_report(
+            [{"symbol": "RELIANCE", "quantity": 10, "average_price": 2500}],
+            account_id=broker["id"],
+        )
+        replace_holding_report(
+            [{"symbol": "PARAG PARIKH ELSS", "quantity": 60.957,
+              "average_price": 32.8}],
+            account_id=broker["id"], source="mf_holding_report",
+        )
+
+        rebuilt = rebuild_holdings()
+        symbols = {row.symbol: row for row in rebuilt}
+        self.assertEqual(len(symbols), 2)
+        self.assertEqual(symbols["RELIANCE"].quantity, 10)
+        self.assertEqual(symbols["PARAG PARIKH ELSS"].quantity, 60.957)
+
+        # A fresher MF report replaces only the MF rows.
+        replace_holding_report(
+            [{"symbol": "SBI ELSS", "quantity": 4.157, "average_price": 481.1}],
+            account_id=broker["id"], source="mf_holding_report",
+        )
+        rebuilt = rebuild_holdings()
+        symbols = {row.symbol for row in rebuilt}
+        self.assertEqual(
+            symbols,
+            {"RELIANCE", "SBI ELSS"},  # Parag Parikh gone, RELIANCE kept
+        )
+
+    def test_mf_snapshot_replaces_transaction_position(self):
+        broker = find_account_by_name("Main broker")
+        add_transactions(
+            [{
+                "trade_date": "2026-01-05", "symbol": "SBI ELSS",
+                "transaction_type": "BUY", "quantity": 2, "price": 500,
+            }],
+            account_id=broker["id"],
+        )
+        replace_holding_report(
+            [{"symbol": "SBI ELSS", "quantity": 4.157,
+              "average_price": 481.1}],
+            account_id=broker["id"], source="mf_holding_report",
+        )
+
+        rebuilt = rebuild_holdings()
+        self.assertEqual(len(rebuilt), 1)
+        self.assertEqual(rebuilt[0].quantity, 4.157)  # replaced, not merged
+
+    def test_replace_holding_report_rejects_unknown_source(self):
+        broker = find_account_by_name("Main broker")
+        with self.assertRaises(ValueError):
+            replace_holding_report(
+                [{"symbol": "ITC", "quantity": 5, "average_price": 400}],
+                account_id=broker["id"], source="snacks",
+            )
+
     def test_holding_report_replaces_transaction_position(self):
         """The broker statement is the authoritative CURRENT position."""
 
