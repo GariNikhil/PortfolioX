@@ -19,6 +19,10 @@ keyring==25.7.0
 # Password vault: AES-GCM encryption of stored passwords
 cryptography==50.0.0
 
+# Stock metadata fetch (sector, market cap) for the dashboard:
+# tools/fetch_stock_metadata.py, explicit network use only
+yfinance==1.7.0
+
 # Planned for later phases (uncomment when adopted):
 # pdfplumber   (richer PDF table extraction, if needed later)
 # matplotlib   (charts)

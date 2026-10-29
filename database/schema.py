@@ -7,13 +7,14 @@ row values by multiplying stored amounts by 100, upgrades a v2 database
 in place with the v3 additions (accounts, prices, account_id), a v3
 database with the v4 additions (account current_balance, manual_holdings),
 a v4 database with the v5 addition (manual_holdings source column), a
-v5 database with the v6 additions (account detail columns), and a v6
-database with the v7 addition (bank_transactions).
+v5 database with the v6 additions (account detail columns), a v6
+database with the v7 addition (bank_transactions), and a v7 database
+with the v8 addition (stock_metadata).
 """
 
 from database.db import transaction
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 # Table definitions. Money columns are INTEGER paise; quantity stays REAL
 # because fractional share counts are legitimate. profit_loss has no
@@ -117,6 +118,20 @@ _TABLES = {
         UNIQUE (account_id, txn_date, description, amount, balance)
     )
     """,
+    # v8: per-symbol stock metadata (sector, market cap), fetched once
+    # by the metadata tool and cached here so the dashboard works
+    # offline. symbol is the canonical holding symbol (uppercase).
+    # market_cap is INTEGER rupees; NULL for funds / ETFs / derivatives,
+    # which have no meaningful market capitalization.
+    "stock_metadata": """
+    CREATE TABLE stock_metadata (
+        symbol TEXT PRIMARY KEY,
+        sector TEXT,
+        market_cap INTEGER,
+        source TEXT NOT NULL DEFAULT 'yahoo',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
     # v4: hand-entered positions. The holdings cache is rebuilt from
     # transactions, so manual entries need their own table to survive
     # rebuilds; rebuild_holdings() merges them in. account_id is NOT NULL
@@ -168,8 +183,9 @@ def ensure_schema():
     manual_holdings table); a v4 database gets the v5 addition
     (manual_holdings source column); a v5 database gets the v6
     additions (account detail columns: holder name, account number,
-    phone, PAN, UCC); and a v6 database gets the v7 addition
-    (bank_transactions table). Databases migrated from the pre-account
+    phone, PAN, UCC); a v6 database gets the v7 addition
+    (bank_transactions table); and a v7 database gets the v8 addition
+    (stock_metadata table). Databases migrated from the pre-account
     era get their holdings table rebuilt when it still enforces
     UNIQUE(symbol) instead of UNIQUE(account_id, symbol).
     A migration that hits constraint violations (bad money data) fails
@@ -201,6 +217,7 @@ def ensure_schema():
         _upgrade_to_v5(connection)
         _upgrade_to_v6(connection)
         _upgrade_to_v7(connection)
+        _upgrade_to_v8(connection)
         _repair_holdings_unique_constraint(connection)
 
         connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -394,6 +411,24 @@ def _upgrade_to_v7(connection):
     }
     if "bank_transactions" not in existing:
         connection.execute(_TABLES["bank_transactions"])
+
+
+def _upgrade_to_v8(connection):
+    """Add the v8 structure to an existing v7 database, idempotently.
+
+    stock_metadata caches per-symbol sector and market cap fetched by
+    the metadata tool, so the dashboard can show cap/sector splits
+    without network access at view time.
+    """
+
+    existing = {
+        row[0]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        )
+    }
+    if "stock_metadata" not in existing:
+        connection.execute(_TABLES["stock_metadata"])
 
 
 def _is_v1(connection, table):

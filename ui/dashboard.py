@@ -6,7 +6,11 @@ all accounts); changing it re-renders the cards and the holdings table.
 
 import customtkinter as ctk
 
-from calculations.allocation import asset_allocation
+from calculations.allocation import (
+    asset_allocation,
+    market_cap_allocation,
+    sector_allocation,
+)
 from calculations.xirr import xirr, xirr_cashflows
 from database.manager import (
     UNASSIGNED,
@@ -14,6 +18,7 @@ from database.manager import (
     get_dividends,
     get_holdings,
     get_portfolio_summary,
+    get_stock_metadata,
     get_transactions,
 )
 from ui.formatting import format_quantity, format_rupees, kpi_cards
@@ -74,6 +79,17 @@ class DashboardPage(ctk.CTkFrame):
         self._render()
 
     # ---------------- Filter ---------------- #
+
+    @staticmethod
+    def _split_text(split, invested):
+        """'(label, amount) ...' pairs -> 'Label 62% · ...' (or a dash)."""
+
+        if invested > 0 and split:
+            return " · ".join(
+                f"{label} {amount / invested * 100:.0f}%"
+                for label, amount in split
+            )
+        return "—"
 
     @staticmethod
     def _filter_choices():
@@ -243,15 +259,15 @@ class DashboardPage(ctk.CTkFrame):
             xirr_text = "—"
 
         allocation = asset_allocation(holdings)
-        if invested > 0 and allocation:
-            allocation_text = " · ".join(
-                f"{label} {amount / invested * 100:.0f}%"
-                for label, amount in allocation
-            )
-        else:
-            allocation_text = "—"
+        allocation_text = self._split_text(allocation, invested)
 
         dividend_total = sum(row["amount"] for row in get_dividends())
+
+        metadata = {row["symbol"]: row for row in get_stock_metadata()}
+        cap_split = market_cap_allocation(holdings, metadata)
+        sector_split = sector_allocation(holdings, metadata)
+        cap_text = self._split_text(cap_split, invested)
+        sector_text = self._split_text(sector_split, invested)
 
         cards = (
             ("Current Holdings", str(len(holdings)),
@@ -260,10 +276,10 @@ class DashboardPage(ctk.CTkFrame):
              "across all symbols"),
             ("XIRR", xirr_text,
              "money-weighted return"),
-            ("Market Cap", "—",
-             "needs stock metadata"),
-            ("Sector Allocation", "—",
-             "needs stock metadata"),
+            ("Market Cap", cap_text,
+             "large / mid / small cap mix"),
+            ("Sector Allocation", sector_text,
+             "by invested amount"),
             ("Asset Allocation", allocation_text,
              "by invested amount"),
             ("Dividends", format_rupees(dividend_total),
@@ -279,9 +295,19 @@ class DashboardPage(ctk.CTkFrame):
             grid.grid_rowconfigure(row, weight=1)
             grid.grid_columnconfigure(column, weight=1)
 
+            # Long split strings (cap / sector mixes) wrap to two or
+            # three lines in a taller card instead of overflowing.
+            value_size = 20
+            card_height = 110
+            wraplength = 0
+            if len(value) > 44:
+                value_size, card_height, wraplength = 12, 140, 190
+            elif len(value) > 26:
+                value_size, wraplength = 14, 190
+
             card = ctk.CTkFrame(
                 grid,
-                height=110,
+                height=card_height,
                 fg_color=CARD,
                 border_width=1,
                 border_color=BORDER,
@@ -299,9 +325,11 @@ class DashboardPage(ctk.CTkFrame):
             ctk.CTkLabel(
                 card,
                 text=value,
-                font=ctk.CTkFont(FONT_FAMILY, 20, "bold"),
+                font=ctk.CTkFont(FONT_FAMILY, value_size, "bold"),
                 text_color=TEXT,
-            ).pack()
+                wraplength=wraplength or 0,
+                justify="center",
+            ).pack(padx=6)
 
             ctk.CTkLabel(
                 card,

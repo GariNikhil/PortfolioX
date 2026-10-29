@@ -33,6 +33,100 @@ def asset_allocation(holdings):
     )
 
 
+# Market-cap category thresholds in rupees. SEBI's official split is
+# rank-based (AMFI's top-100 / 101-250 lists); these absolute cutoffs
+# are the common approximation and only shift at the edges.
+LARGE_CAP_MIN = 1_00_000 * 10**7   # >= Rs 1,00,000 crore
+MID_CAP_MIN = 25_000 * 10**7       # >= Rs 25,000 crore
+
+
+def market_cap_category(market_cap):
+    """Market cap in rupees -> 'Large Cap' / 'Mid Cap' / 'Small Cap'."""
+
+    if market_cap >= LARGE_CAP_MIN:
+        return "Large Cap"
+    if market_cap >= MID_CAP_MIN:
+        return "Mid Cap"
+    return "Small Cap"
+
+
+def metadata_allocation(holdings, metadata, classify):
+    """Split holdings by a metadata-derived label, by invested amount.
+
+    metadata maps symbol -> metadata rows (sector / market_cap);
+    classify(symbol, row) returns the label for one holding. Symbols
+    with no metadata row get the classify(None, None) fallback label
+    ('Unclassified' in practice). Returns (label, amount) pairs sorted
+    by amount descending, zero amounts omitted.
+    """
+
+    amounts = defaultdict(float)
+    for holding in holdings:
+        symbol = str(holding.get("symbol") or "").upper()
+        row = metadata.get(symbol)
+        amounts[classify(symbol, row)] += float(
+            holding.get("invested_amount") or 0
+        )
+
+    return sorted(
+        ((label, amount) for label, amount in amounts.items() if amount),
+        key=lambda pair: pair[1],
+        reverse=True,
+    )
+
+
+def sector_allocation(holdings, metadata):
+    """Sector split by invested amount (rupees).
+
+    Funds and ETFs carry their own sector label ('Mutual Fund' / 'ETF')
+    from the metadata; stocks carry their fetched sector; symbols with
+    no metadata land in 'Unclassified'.
+    """
+
+    return metadata_allocation(holdings, metadata, _sector_label)
+
+
+def _sector_label(symbol, row):
+    if row is None:
+        return fund_or_fno_label(symbol) or "Unclassified"
+    return row["sector"] or "Unclassified"
+
+
+def market_cap_allocation(holdings, metadata):
+    """Market-cap-category split by invested amount (rupees).
+
+    Stocks land in Large / Mid / Small Cap by their cached market cap
+    (approximate SEBI thresholds); funds / ETFs / derivatives have no
+    market cap and keep their own label so the split still sums to the
+    portfolio.
+    """
+
+    def classify(symbol, row):
+        if row is not None and row["market_cap"] is not None:
+            return market_cap_category(row["market_cap"])
+        return fund_or_fno_label(symbol) or "Unclassified"
+
+    return metadata_allocation(holdings, metadata, classify)
+
+
+def fund_or_fno_label(symbol):
+    """Label for symbols that are not plain stocks, or None.
+
+    Local heuristics, no metadata needed: F&O contracts by their symbol
+    shape, mutual funds and ETFs by name patterns common in broker
+    holding statements ('ELSS ... FUND DIRECT GROWTH', 'GROWWAMC - ...').
+    """
+
+    if normalize_fno_symbol(symbol):
+        return "F&O"
+    upper = symbol.upper()
+    if "ELSS" in upper or " FUND " in f" {upper} " or "FUND DIRECT" in upper:
+        return "Mutual Fund"
+    if "ETF" in upper or "AMC" in upper:
+        return "ETF"
+    return None
+
+
 def financial_year_of(trade_date):
     """ISO date 'YYYY-MM-DD' -> the FY label it falls in (April-March).
 
