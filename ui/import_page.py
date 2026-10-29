@@ -1,5 +1,16 @@
 """Import page: pick a broker file, run the right importer, see the result.
 
+Three steps, in order:
+
+1. **File type** - the physical format the file comes as (XLSX, XLS,
+   CSV, PDF). Different brokers and banks export the same data in
+   different shapes, so the format is chosen first.
+2. **File for** - what the file is for (tradebook, contract note,
+   holding statement, bank statement...). The options are filtered to
+   the purposes that exist for the chosen file type, and the
+   (type, purpose) pair selects the actual importer.
+3. **Select a/c** - which account the rows belong to (or auto-detect).
+
 Encrypted contract-note PDFs get the once-only password flow: on
 PasswordRequiredError the page asks for the password (hidden input),
 stores it in the encrypted vault, and retries - every later import of
@@ -26,23 +37,64 @@ from database.manager import get_accounts
 from security.vault import PasswordRequiredError, VaultError, store_password
 from ui.theme import *
 
-# label -> (password kind, callable(path, ...) -> ImportResult, needs_date,
-#           auto_creates_account). Bank-statement importers auto-create
-#           their PERSONAL account on first import (after auto-detection
-#           fails), so an unresolved AUTO_DETECT is not an error for them.
+# Importer spec: (password kind, callable(path, ...) -> ImportResult,
+# needs_date, auto_creates_account). Bank-statement importers auto-create
+# their PERSONAL account on first import (after auto-detection fails),
+# so an unresolved AUTO_DETECT is not an error for them.
+_GROWW = ("GROWW_TRADEBOOK", import_groww_tradebook, False, False)
+_HOLDING = ("HOLDING_REPORT", import_holding_report, False, False)
+_MF_HOLDING = ("MF_HOLDING_REPORT", import_mf_holding_report, False, False)
+
+# (file type, purpose) -> importer spec. The file type is the physical
+# format (step 1), the purpose is what the file is for (step 2); a
+# purpose appears under every type a broker might export it as. Where
+# two banks share a type and purpose, the label names the bank.
 _IMPORTERS = {
-    "Groww tradebook (CSV / XLSX)": ("GROWW_TRADEBOOK", import_groww_tradebook, False, False),
-    "Contract-note Orders sheet (XLSX)": ("CONTRACT_NOTE_ORDERS", import_contract_note, True, False),
-    "IIFL Trade Listing (.xls)": ("IIFL_TRADE_LISTING", import_iifl_trade_listing, False, False),
-    "stocksledger Portfolio (XLSX)": ("STOCKSLEDGER_PORTFOLIO", import_stocksledger_portfolio, False, False),
-    "Holding report (XLSX / CSV)": ("HOLDING_REPORT", import_holding_report, False, False),
-    "Mutual fund holdings (XLSX / CSV)": ("MF_HOLDING_REPORT", import_mf_holding_report, False, False),
-    "Contract-note PDF": ("CONTRACT_NOTE_PDF", import_contract_note_pdf, False, False),
-    "Axis Bank statement (PDF)": ("AXIS_STATEMENT", import_axis_statement, False, True),
-    "PNB mPassbook statement (PDF)": ("PNB_MPASSBOOK", import_pnb_statement, False, True),
+    ("XLSX", "Tradebook / transaction history"): _GROWW,
+    ("CSV", "Tradebook / transaction history"): _GROWW,
+    ("XLS", "Trade listing (IIFL)"):
+        ("IIFL_TRADE_LISTING", import_iifl_trade_listing, False, False),
+    ("XLSX", "Contract note - Orders sheet"):
+        ("CONTRACT_NOTE_ORDERS", import_contract_note, True, False),
+    ("PDF", "Contract note"):
+        ("CONTRACT_NOTE_PDF", import_contract_note_pdf, False, False),
+    ("XLSX", "Portfolio snapshot (stocksledger)"):
+        ("STOCKSLEDGER_PORTFOLIO", import_stocksledger_portfolio, False, False),
+    ("XLSX", "Holding statement (stocks)"): _HOLDING,
+    ("CSV", "Holding statement (stocks)"): _HOLDING,
+    ("XLSX", "Mutual fund holdings"): _MF_HOLDING,
+    ("CSV", "Mutual fund holdings"): _MF_HOLDING,
+    ("PDF", "Bank statement - Axis Bank"):
+        ("AXIS_STATEMENT", import_axis_statement, False, True),
+    ("PDF", "Bank statement - PNB mPassbook"):
+        ("PNB_MPASSBOOK", import_pnb_statement, False, True),
+}
+
+FILE_TYPES = ("XLSX", "XLS", "CSV", "PDF")
+
+# File dialog filter per file type.
+_FILE_PATTERNS = {
+    "XLSX": ("Excel workbooks", "*.xlsx"),
+    "XLS": ("Legacy Excel files", "*.xls"),
+    "CSV": ("CSV files", "*.csv"),
+    "PDF": ("PDF files", "*.pdf"),
+}
+
+# Extension each file type should have; a mismatch is reported before
+# the importer gets a file it cannot parse.
+_EXPECTED_SUFFIX = {
+    "XLSX": ".xlsx", "XLS": ".xls", "CSV": ".csv", "PDF": ".pdf",
 }
 
 AUTO_DETECT = "Auto-detect from file"
+
+
+def purposes_for(file_type):
+    """Purpose labels (step 2 options) available for a file type."""
+
+    return [
+        purpose for (ftype, purpose) in _IMPORTERS if ftype == file_type
+    ]
 
 
 class ImportPage(ctk.CTkFrame):
@@ -61,10 +113,51 @@ class ImportPage(ctk.CTkFrame):
             text_color=TEXT,
         ).pack(pady=(40, 16))
 
+        # ---------------- 1. File type ---------------- #
+
+        type_row = ctk.CTkFrame(self, fg_color="transparent")
+        type_row.pack(fill="x", padx=PADDING, pady=(0, 6))
+
+        ctk.CTkLabel(
+            type_row, text="1. File type:", font=BODY_FONT, text_color=TEXT,
+            width=110, anchor="w",
+        ).pack(side="left")
+
+        self.type_menu = ctk.CTkOptionMenu(
+            type_row, values=list(FILE_TYPES), width=140,
+            command=self._type_changed,
+        )
+        self.type_menu.set("XLSX")
+        self.type_menu.pack(side="left")
+
+        # ---------------- 2. File for ---------------- #
+
+        purpose_row = ctk.CTkFrame(self, fg_color="transparent")
+        purpose_row.pack(fill="x", padx=PADDING, pady=(0, 6))
+
+        ctk.CTkLabel(
+            purpose_row, text="2. File for:", font=BODY_FONT, text_color=TEXT,
+            width=110, anchor="w",
+        ).pack(side="left")
+
+        self.purpose_menu = ctk.CTkOptionMenu(
+            purpose_row, values=purposes_for("XLSX"), width=320,
+            command=self._purpose_changed,
+        )
+        self.purpose_menu.set(purposes_for("XLSX")[0])
+        self.purpose_menu.pack(side="left")
+
         # ---------------- File picker ---------------- #
 
         picker = ctk.CTkFrame(self, fg_color="transparent")
-        picker.pack(fill="x", padx=PADDING)
+        picker.pack(fill="x", padx=PADDING, pady=(0, 6))
+
+        ctk.CTkButton(
+            picker,
+            text="Choose file...",
+            width=140,
+            command=self.choose_file,
+        ).pack(side="left", padx=(110 + 12, 12))
 
         self.file_label = ctk.CTkLabel(
             picker,
@@ -73,25 +166,7 @@ class ImportPage(ctk.CTkFrame):
             text_color=TEXT_SECONDARY,
             anchor="w",
         )
-        self.file_label.pack(side="left", padx=(0, 12), fill="x", expand=True)
-
-        ctk.CTkButton(
-            picker,
-            text="Choose file...",
-            width=140,
-            command=self.choose_file,
-        ).pack(side="left")
-
-        # ---------------- Importer choice ---------------- #
-
-        self.source_menu = ctk.CTkOptionMenu(
-            self,
-            values=list(_IMPORTERS),
-            width=340,
-            command=self._source_changed,
-        )
-        self.source_menu.set("Groww tradebook (CSV / XLSX)")
-        self.source_menu.pack(pady=16)
+        self.file_label.pack(side="left", fill="x", expand=True)
 
         # ---------------- Orders trade date ---------------- #
 
@@ -102,23 +177,27 @@ class ImportPage(ctk.CTkFrame):
             font=BODY_FONT,
             text_color=TEXT,
         )
-        self.date_label.pack(side="left", padx=(0, 8))
+        self.date_label.pack(side="left", padx=(110 + 12, 8))
         self.date_entry = ctk.CTkEntry(self.date_frame, width=140, placeholder_text="2023-07-03")
         self.date_entry.pack(side="left")
 
-        # ---------------- Account choice ---------------- #
+        # ---------------- 3. Select a/c ---------------- #
 
-        account_row = ctk.CTkFrame(self, fg_color="transparent")
-        account_row.pack(pady=4)
+        self.account_row = ctk.CTkFrame(self, fg_color="transparent")
+        self.account_row.pack(fill="x", padx=PADDING, pady=(6, 4))
 
         ctk.CTkLabel(
-            account_row,
-            text="Assign to account:",
+            self.account_row,
+            text="3. Select a/c:",
             font=BODY_FONT,
             text_color=TEXT,
-        ).pack(side="left", padx=(0, 8))
+            width=110,
+            anchor="w",
+        ).pack(side="left")
 
-        self.account_menu = ctk.CTkOptionMenu(account_row, values=self._account_choices(), width=240)
+        self.account_menu = ctk.CTkOptionMenu(
+            self.account_row, values=self._account_choices(), width=320,
+        )
         self.account_menu.set(self._account_choices()[0])
         self.account_menu.pack(side="left")
 
@@ -138,17 +217,23 @@ class ImportPage(ctk.CTkFrame):
         self.result_box = ctk.CTkTextbox(self, font=("Consolas", 13))
         self.result_box.pack(fill="both", expand=True, padx=PADDING, pady=PADDING)
         self.result_box.insert("0.0",
-                               "Pick a broker or bank file, choose its format,\n"
-                               "and import. Encrypted PDFs ask for their password\n"
-                               "once - it is stored encrypted and never asked again.")
+                               "1. File type - the format the file comes as.\n"
+                               "2. File for - what the file is for.\n"
+                               "3. Select a/c - or auto-detect from the file.\n\n"
+                               "Encrypted PDFs ask for their password once -\n"
+                               "it is stored encrypted and never asked again.")
+
+    def _importer_spec(self):
+        """The (kind, importer, needs_date, auto_creates) for the choice."""
+
+        key = (self.type_menu.get(), self.purpose_menu.get())
+        return _IMPORTERS[key]
 
     def choose_file(self):
+        label, pattern = _FILE_PATTERNS[self.type_menu.get()]
         path = tkinter.filedialog.askopenfilename(
-            title="Choose a broker file",
-            filetypes=[
-                ("Broker files", "*.csv *.xlsx *.xls *.pdf"),
-                ("All files", "*.*"),
-            ],
+            title="Choose the file to import",
+            filetypes=[(label, pattern), ("All files", "*.*")],
         )
         if path:
             self.file_path = Path(path)
@@ -197,9 +282,28 @@ class ImportPage(ctk.CTkFrame):
                 return account["id"], None
         return None, None
 
-    def _source_changed(self, choice):
-        if _IMPORTERS[choice][2]:
-            self.date_frame.pack(pady=4)
+    def _type_changed(self, file_type):
+        """New file type: refill the purposes and refresh the date row."""
+
+        purposes = purposes_for(file_type)
+        self.purpose_menu.configure(values=purposes)
+        self.purpose_menu.set(purposes[0])
+        self._sync_date_row()
+
+    def _purpose_changed(self, _purpose):
+        self._sync_date_row()
+
+    def _sync_date_row(self):
+        """Show the trade-date row only for importers that need one.
+
+        `before=` keeps it between the file picker and the a/c row no
+        matter when it gets (re)packed.
+        """
+
+        if self._importer_spec()[2]:
+            self.date_frame.pack(
+                fill="x", padx=PADDING, pady=(0, 6), before=self.account_row,
+            )
         else:
             self.date_frame.pack_forget()
 
@@ -210,8 +314,17 @@ class ImportPage(ctk.CTkFrame):
             self._report("Choose a file first.", error=True)
             return
 
-        label = self.source_menu.get()
-        kind, importer, needs_date, auto_creates = _IMPORTERS[label]
+        expected = _EXPECTED_SUFFIX[self.type_menu.get()]
+        if self.file_path.suffix.lower() != expected:
+            self._report(
+                f"File type is {self.type_menu.get()} ({expected}) but the "
+                f"selected file is '{self.file_path.name}'. Pick the file "
+                "type that matches the file, or choose another file.",
+                error=True,
+            )
+            return
+
+        kind, importer, needs_date, auto_creates = self._importer_spec()
 
         account_id, note = self._resolve_account_id(allow_unresolved=auto_creates)
         if note is not None and account_id is None:
@@ -266,8 +379,7 @@ class ImportPage(ctk.CTkFrame):
 
         try:
             store_password(kind, password.strip())
-            label = self.source_menu.get()
-            _kind, importer, needs_date, auto_creates = _IMPORTERS[label]
+            _kind, importer, needs_date, auto_creates = self._importer_spec()
             account_id, note = self._resolve_account_id(
                 allow_unresolved=auto_creates,
             )
