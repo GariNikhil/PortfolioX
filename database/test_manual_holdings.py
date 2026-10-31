@@ -528,6 +528,102 @@ class V5LayerTests(unittest.TestCase):
                 account_id=broker["id"], source="snacks",
             )
 
+    def test_us_report_replaces_only_its_own_symbols(self):
+        """A US statement says nothing about the account's Indian stocks."""
+
+        broker = find_account_by_name("Main broker")
+        add_transactions(
+            [{
+                "trade_date": "2026-01-05", "symbol": "RELIANCE",
+                "transaction_type": "BUY", "quantity": 10, "price": 2500,
+            }],
+            account_id=broker["id"],
+        )
+        add_transactions(
+            [{
+                "trade_date": "2026-01-06", "symbol": "AAPL",
+                "transaction_type": "BUY", "quantity": 2, "price": 15000,
+            }],
+            account_id=broker["id"],
+        )
+        replace_holding_report(
+            [{"symbol": "AAPL", "quantity": 3, "average_price": 14500}],
+            account_id=broker["id"], source="us_holding_report",
+        )
+
+        rebuilt = rebuild_holdings()
+        by_symbol = {row.symbol: row for row in rebuilt}
+        # The US snapshot replaced the AAPL transaction position...
+        self.assertEqual(by_symbol["AAPL"].quantity, 3)
+        self.assertEqual(by_symbol["AAPL"].average_price, 1450000)  # paise
+        # ...but the Indian transaction-derived position survives.
+        self.assertEqual(by_symbol["RELIANCE"].quantity, 10)
+
+    def test_bond_report_replaces_transaction_position(self):
+        broker = find_account_by_name("Main broker")
+        add_transactions(
+            [{
+                "trade_date": "2026-01-05", "symbol": "NHAI BOND",
+                "transaction_type": "BUY", "quantity": 10, "price": 1000,
+            }],
+            account_id=broker["id"],
+        )
+        replace_holding_report(
+            [{"symbol": "NHAI BOND", "quantity": 12, "average_price": 995}],
+            account_id=broker["id"], source="bond_holding_report",
+        )
+
+        rebuilt = rebuild_holdings()
+        self.assertEqual(len(rebuilt), 1)
+        self.assertEqual(rebuilt[0].quantity, 12)
+
+    def test_us_and_stock_reports_replace_independently(self):
+        """Re-importing one asset class never wipes another's snapshot."""
+
+        broker = find_account_by_name("Main broker")
+        replace_holding_report(
+            [{"symbol": "RELIANCE", "quantity": 10, "average_price": 2500}],
+            account_id=broker["id"],
+        )
+        replace_holding_report(
+            [{"symbol": "AAPL", "quantity": 2, "average_price": 15000}],
+            account_id=broker["id"], source="us_holding_report",
+        )
+
+        # A fresher US report leaves the Indian snapshot untouched, and
+        # replaces the US snapshot wholesale (AAPL is no longer listed).
+        replace_holding_report(
+            [{"symbol": "MSFT", "quantity": 1, "average_price": 20000}],
+            account_id=broker["id"], source="us_holding_report",
+        )
+
+        rebuilt = rebuild_holdings()
+        by_symbol = {row.symbol: row for row in rebuilt}
+        self.assertEqual(by_symbol["RELIANCE"].quantity, 10)
+        self.assertEqual(by_symbol["MSFT"].quantity, 1)
+        self.assertNotIn("AAPL", by_symbol)
+
+    def test_delete_holding_behind_a_us_snapshot_keeps_history(self):
+        broker = find_account_by_name("Main broker")
+        add_transactions(
+            [{
+                "trade_date": "2026-01-06", "symbol": "AAPL",
+                "transaction_type": "BUY", "quantity": 2, "price": 15000,
+            }],
+            account_id=broker["id"],
+        )
+        replace_holding_report(
+            [{"symbol": "AAPL", "quantity": 3, "average_price": 14500}],
+            account_id=broker["id"], source="us_holding_report",
+        )
+
+        manual_deleted, transaction_deleted = delete_holding(
+            broker["id"], "AAPL",
+        )
+
+        self.assertEqual(manual_deleted, 1)
+        self.assertEqual(transaction_deleted, 0)  # trade history survives
+
     def test_holding_report_replaces_transaction_position(self):
         """The broker statement is the authoritative CURRENT position."""
 

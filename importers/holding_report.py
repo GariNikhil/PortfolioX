@@ -7,6 +7,13 @@ are stored as source='holding_report' rows in manual_holdings and
 REPLACE the transaction-derived position at rebuild time (the report
 knows about sells the contract notes may not).
 
+The same parser serves every asset class: US-stock and bond statements
+are ordinary symbol/quantity/average-price tables too, so they are
+imported through this module with source='us_holding_report' /
+'bond_holding_report'. Each source is a separate slot in
+manual_holdings, so a fresher US statement replaces the previous US
+statement only and never the Indian or fund snapshots for the account.
+
 Import semantics:
 
 - The report is assigned to one account; a re-import for that account
@@ -47,6 +54,16 @@ from database import manager
 
 SOURCE_KIND = "HOLDING_REPORT"
 
+# Snapshot source -> imports-audit kind. The source names the storage slot
+# in manual_holdings (lowercase, per manager.SNAPSHOT_SOURCES); the audit
+# kind follows the uppercase convention of the other importers.
+_AUDIT_KINDS = {
+    "holding_report": "HOLDING_REPORT",
+    "mf_holding_report": "MF_HOLDING_REPORT",
+    "us_holding_report": "US_HOLDING_REPORT",
+    "bond_holding_report": "BOND_HOLDING_REPORT",
+}
+
 # Column detection, in priority order: the first header cell matching an
 # earlier pattern wins, so 'buy avg' beats a bare 'price' and 'free qty'
 # beats a generic 'balance'. Patterns are lowercase fragments matched
@@ -82,33 +99,38 @@ _OPTIONAL_COLUMN_PATTERNS = {
 _HEADER_MATCH = ("symbol", "quantity", "average_price")
 
 
-def import_holding_report(path, account_id=None):
+def import_holding_report(path, account_id=None, source="holding_report"):
     """Import a holding-report file and return an ImportResult.
 
     The report must be assigned to an existing account (a holdings
-    statement is per broker account by nature). File-level problems raise
+    statement is per broker account by nature). source tags both the
+    audit entry and the manual_holdings snapshot rows: 'holding_report'
+    for Indian stock statements, 'us_holding_report' /
+    'bond_holding_report' for the other asset classes (each is replaced
+    independently on re-import). File-level problems raise
     ImportFileError after recording a FAILED audit entry; row-level
     problems never abort the import.
     """
 
-    source = Path(path)
-    filename = source.name
+    file = Path(path)
+    filename = file.name
+    audit_kind = _AUDIT_KINDS.get(source, SOURCE_KIND)
 
     try:
-        rows, failures = parse_holding_report(source)
+        rows, failures = parse_holding_report(file)
     except ImportFileError as error:
-        record_import(filename, SOURCE_KIND, f"FAILED ({error})")
+        record_import(filename, audit_kind, f"FAILED ({error})")
         raise
 
     if not rows:
         message = f"{filename} contains no importable holding rows"
-        record_import(filename, SOURCE_KIND, f"FAILED ({message})")
+        record_import(filename, audit_kind, f"FAILED ({message})")
         raise ImportFileError(message)
 
     # Auto-fill account details from label/value rows in the file
     # (e.g. 'Unique Client Code', '1234567890'). Only fills account
     # fields the user has not filled themselves.
-    details = extract_account_details(source)
+    details = extract_account_details(file)
     if details and account_id is not None:
         try:
             manager.fill_account_details_if_empty(account_id, **details)
@@ -120,16 +142,16 @@ def import_holding_report(path, account_id=None):
     try:
         # Audit first so the snapshot rows can carry the audit row's id;
         # the status flips to SUCCESS/FAILED once the batch is committed.
-        import_id = record_import(filename, SOURCE_KIND, "PENDING")
+        import_id = record_import(filename, audit_kind, "PENDING")
         imported = manager.replace_holding_report(
-            rows, account_id, import_id=import_id,
+            rows, account_id, source=source, import_id=import_id,
         )
         # Seed market prices from the report's closing-price column when
         # present, BEFORE the rebuild so market value and P&L light up.
         for row in rows:
             price = row.get("closing_price")
             if price is not None:
-                manager.set_price(row["symbol"], price, source="holding_report")
+                manager.set_price(row["symbol"], price, source=source)
         manager.rebuild_holdings()
     except Exception as error:
         finish_import(import_id, f"FAILED ({error})")

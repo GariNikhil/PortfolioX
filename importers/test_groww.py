@@ -135,6 +135,21 @@ class ImportTests(PortfolioXImportTestCase):
         import_log = db.fetch_all("SELECT status FROM imports")
         self.assertEqual(len(import_log), 2)
 
+    def test_source_kind_tags_the_audit_entry(self):
+        """US/bond tradebooks reuse the parser under their own kind."""
+
+        result = import_groww_tradebook(
+            FIXTURE_CSV, source_kind="US_TRADEBOOK",
+        )
+
+        self.assertEqual(result.imported, 4)
+        import_log = db.fetch_all(
+            "SELECT filename, import_type, status FROM imports",
+        )
+        self.assertEqual(len(import_log), 1)
+        self.assertEqual(import_log[0]["import_type"], "US_TRADEBOOK")
+        self.assertEqual(import_log[0]["status"], "SUCCESS")
+
     def test_skip_duplicates_false_allows_full_reimport(self):
         import_groww_tradebook(FIXTURE_CSV)
         second = import_groww_tradebook(FIXTURE_CSV, skip_duplicates=False)

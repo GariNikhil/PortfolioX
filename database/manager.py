@@ -16,6 +16,20 @@ from calculations.holdings import calculate_holdings
 
 PAISE_PER_RUPEE = 100
 
+# manual_holdings sources that carry an imported statement snapshot.
+# Each source is replaced independently on re-import (a fresher report
+# cannot leave stale symbols behind), and snapshot rows replace the
+# transaction-derived position for their own symbols at rebuild time.
+# holding_report governs Indian stock statements, mf_holding_report fund
+# statements; us_holding_report and bond_holding_report govern US-stock
+# and bond statements, which replace only the symbols they list (a US
+# statement says nothing about the account's Indian stocks, so it must
+# not make them stale the way a same-class stock report does).
+SNAPSHOT_SOURCES = (
+    "holding_report", "mf_holding_report",
+    "us_holding_report", "bond_holding_report",
+)
+
 # Sentinel account filter: rows with account_id IS NULL ("Unassigned").
 # Real account ids come from the accounts table (positive integers), so a
 # negative sentinel can never collide.
@@ -622,11 +636,10 @@ def add_manual_holding(account_id, symbol, quantity, average_price,
     cache by rebuild_holdings(), so they survive cache rebuilds. Re-adding
     the same (account, symbol) replaces the earlier entry. source decides
     the merge semantics: 'manual' rows add to transaction-derived
-    positions, snapshot rows ('holding_report', 'mf_holding_report')
-    replace them.
+    positions, snapshot rows (the SNAPSHOT_SOURCES) replace them.
     """
 
-    if source not in ("manual", "holding_report", "mf_holding_report"):
+    if source not in ("manual",) + SNAPSHOT_SOURCES:
         raise ValueError(f"unsupported holding source {source!r}")
 
     symbol = str(symbol or "").strip().upper()
@@ -666,16 +679,18 @@ def replace_holding_report(rows, account_id, source="holding_report",
     Deletes every row of the given source for the account before
     inserting the new snapshot, so a fresher report cannot leave stale
     symbols behind (a symbol sold since the last report disappears).
-    source is 'holding_report' (stock statements) or
-    'mf_holding_report' (mutual-fund statements); the two are replaced
-    independently, so importing one never wipes the other. User-added
-    'manual' rows are untouched; a snapshot row for a manually-added
-    symbol replaces it (the report wins).
+    source is any SNAPSHOT_SOURCES entry: 'holding_report' (stock
+    statements), 'mf_holding_report' (mutual-fund statements),
+    'us_holding_report' (US-stock statements) or 'bond_holding_report'
+    (bond statements); each is replaced independently, so importing one
+    never wipes another. User-added 'manual' rows are untouched; a
+    snapshot row for a manually-added symbol replaces it (the report
+    wins).
     Rows are mappings with symbol, quantity, average_price (rupees).
     Returns the number of rows stored.
     """
 
-    if source not in ("holding_report", "mf_holding_report"):
+    if source not in SNAPSHOT_SOURCES:
         raise ValueError(f"unsupported holding-report source {source!r}")
 
     if find_account_by_id(account_id) is None:
@@ -847,8 +862,8 @@ def delete_holding(account_id, symbol):
 
     The holding is identified by its current (account_id, symbol) -
     account_id may be None for unassigned rows. When the position is
-    backed by a statement snapshot (holding_report / mf_holding_report)
-    only the snapshot rows are removed, so the imported trade history
+    backed by a statement snapshot (any SNAPSHOT_SOURCES source) only
+    the snapshot rows are removed, so the imported trade history
     survives; the statement rule keeps the position out of the rebuilt
     cache regardless. Otherwise the underlying transactions are removed
     too, because a purely transaction-derived position would reappear
@@ -861,13 +876,14 @@ def delete_holding(account_id, symbol):
         raise ValueError("symbol must not be empty")
 
     with transaction() as connection:
+        placeholders = ", ".join("?" for _ in SNAPSHOT_SOURCES)
         snapshot = connection.execute(
-            """
+            f"""
             SELECT COUNT(*) FROM manual_holdings
             WHERE account_id IS ? AND UPPER(symbol) = ?
-              AND source IN ('holding_report', 'mf_holding_report')
+              AND source IN ({placeholders})
             """,
-            (account_id, symbol),
+            (account_id, symbol, *SNAPSHOT_SOURCES),
         ).fetchone()[0]
 
         cursor = connection.execute(
@@ -897,16 +913,20 @@ def _merge_manual_holdings(rebuilt, priced):
       to any transaction-derived position for the same (account, canonical
       symbol) — invested grows by quantity x average and the average price
       recomputes weighted. Unmatched manual symbols become new rows.
-    - snapshot sources ('holding_report', 'mf_holding_report'): the
-      statement is the authoritative CURRENT position, so it replaces the
-      transaction-derived row outright (the report knows about sells the
-      contract notes may not). Stronger still: once an account has a
-      statement for an asset class, transaction-derived positions of
+    - snapshot sources (the SNAPSHOT_SOURCES): the statement is the
+      authoritative CURRENT position, so it replaces the
+      transaction-derived row outright (the report knows about sells
+      the contract notes may not). Stronger still: once an account has
+      a statement for an asset class, transaction-derived positions of
       that class the statement does not list are stale (sold outside
       the imported files) and drop out of the cache - the transactions
       themselves stay as history. Stock/F&O positions are governed by
       holding_report rows, fund positions by mf_holding_report rows.
-      Manually added positions are explicit user intent and survive.
+      us_holding_report and bond_holding_report rows govern ONLY the
+      symbols they list (a US-stock or bond statement says nothing
+      about the account's Indian stocks, so it must not make them
+      stale). Manually added positions are explicit user intent and
+      survive.
 
     Manual symbols are canonicalized like transaction symbols; the
     manual_holdings table keeps its verbatim symbol.
@@ -938,13 +958,19 @@ def _merge_manual_holdings(rebuilt, priced):
 
         if manual["source"] != "manual":
             snapshot_keys.add(key)
-            snapshots = (
-                fund_snapshots if manual["source"] == "mf_holding_report"
-                else stock_snapshots
-            )
-            snapshots.setdefault(manual["account_id"], set()).add(
-                symbol.upper(),
-            )
+            if manual["source"] == "mf_holding_report":
+                snapshots = fund_snapshots
+            elif manual["source"] == "holding_report":
+                snapshots = stock_snapshots
+            else:
+                # US-stock / bond statements: symbol-level authority
+                # only (the replacement above already covers their own
+                # symbols); they must not stale-drop other classes.
+                snapshots = None
+            if snapshots is not None:
+                snapshots.setdefault(manual["account_id"], set()).add(
+                    symbol.upper(),
+                )
             by_key[key] = RebuiltHolding(
                 account_id=manual["account_id"],
                 symbol=symbol,

@@ -18,11 +18,13 @@ that file runs without asking again.
 """
 
 import tkinter.filedialog
+from functools import partial
 from pathlib import Path
 
 import customtkinter as ctk
 
 from importers.axis_statement import import_axis_statement
+from importers.bank_statement_tabular import import_bank_statement_tabular
 from importers.contract_note import import_contract_note
 from importers.groww import import_groww_tradebook
 from importers.holding_report import import_holding_report
@@ -45,6 +47,43 @@ _GROWW = ("GROWW_TRADEBOOK", import_groww_tradebook, False, False)
 _HOLDING = ("HOLDING_REPORT", import_holding_report, False, False)
 _MF_HOLDING = ("MF_HOLDING_REPORT", import_mf_holding_report, False, False)
 
+# US stocks and bonds reuse the generic tradebook / holding-report
+# parsers with their own audit kinds and snapshot sources, so their
+# rows are filed and replaced independently of Indian stocks.
+_US_TRADEBOOK = (
+    "US_TRADEBOOK",
+    partial(import_groww_tradebook, source_kind="US_TRADEBOOK"),
+    False, False,
+)
+_US_HOLDING = (
+    "US_HOLDING_REPORT",
+    partial(import_holding_report, source="us_holding_report"),
+    False, False,
+)
+_BOND_TRADEBOOK = (
+    "BOND_TRADEBOOK",
+    partial(import_groww_tradebook, source_kind="BOND_TRADEBOOK"),
+    False, False,
+)
+_BOND_HOLDING = (
+    "BOND_HOLDING_REPORT",
+    partial(import_holding_report, source="bond_holding_report"),
+    False, False,
+)
+
+# Spreadsheet bank statements (banks also export Excel, not just PDF);
+# bank_name names the auto-created PERSONAL account on first import.
+_AXIS_XLS = (
+    None,
+    partial(import_bank_statement_tabular, bank_name="Axis Bank"),
+    False, True,
+)
+_PNB_XLS = (
+    None,
+    partial(import_bank_statement_tabular, bank_name="Punjab National Bank"),
+    False, True,
+)
+
 # (file type, purpose) -> importer spec. The file type is the physical
 # format (step 1), the purpose is what the file is for (step 2); a
 # purpose appears under every type a broker might export it as. Where
@@ -64,10 +103,22 @@ _IMPORTERS = {
     ("CSV", "Holding statement (stocks)"): _HOLDING,
     ("XLSX", "Mutual fund holdings"): _MF_HOLDING,
     ("CSV", "Mutual fund holdings"): _MF_HOLDING,
+    ("XLSX", "Tradebook (US stocks)"): _US_TRADEBOOK,
+    ("CSV", "Tradebook (US stocks)"): _US_TRADEBOOK,
+    ("XLSX", "Holding statement (US stocks)"): _US_HOLDING,
+    ("CSV", "Holding statement (US stocks)"): _US_HOLDING,
+    ("XLSX", "Tradebook (bonds)"): _BOND_TRADEBOOK,
+    ("CSV", "Tradebook (bonds)"): _BOND_TRADEBOOK,
+    ("XLSX", "Holding statement (bonds)"): _BOND_HOLDING,
+    ("CSV", "Holding statement (bonds)"): _BOND_HOLDING,
     ("PDF", "Bank statement - Axis Bank"):
         ("AXIS_STATEMENT", import_axis_statement, False, True),
     ("PDF", "Bank statement - PNB mPassbook"):
         ("PNB_MPASSBOOK", import_pnb_statement, False, True),
+    ("XLSX", "Bank statement - Axis Bank"): _AXIS_XLS,
+    ("CSV", "Bank statement - Axis Bank"): _AXIS_XLS,
+    ("XLSX", "Bank statement - PNB"): _PNB_XLS,
+    ("CSV", "Bank statement - PNB"): _PNB_XLS,
 }
 
 FILE_TYPES = ("XLSX", "XLS", "CSV", "PDF")

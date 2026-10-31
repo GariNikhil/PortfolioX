@@ -81,9 +81,13 @@ ISIN_PATTERN = re.compile(r"^[A-Za-z]{2}[A-Za-z0-9]{9}[0-9]$")
 GrowwImportError = ImportFileError
 
 
-def import_groww_tradebook(path, skip_duplicates=True, account_id=None):
+def import_groww_tradebook(path, skip_duplicates=True, account_id=None,
+                           source_kind="GROWW_TRADEBOOK"):
     """Import a tradebook file and return an ImportResult.
 
+    The parser is generic (keyword column detection over common broker
+    header names), so other asset classes reuse it: source_kind tags the
+    audit entry (GROWW_TRADEBOOK, US_TRADEBOOK, BOND_TRADEBOOK, ...).
     File-level problems (missing file, wrong columns, no data rows) raise
     GrowwImportError after recording a FAILED entry in the imports table.
     Row-level problems never abort the import: good rows persist and bad
@@ -96,15 +100,15 @@ def import_groww_tradebook(path, skip_duplicates=True, account_id=None):
     try:
         rows, failures = parse_groww_tradebook(source)
     except GrowwImportError as error:
-        _record_import(filename, f"FAILED ({error})")
+        _record_import(filename, f"FAILED ({error})", source_kind)
         raise
 
     if not rows:
         message = f"FAILED (no importable data rows in {filename})"
-        _record_import(filename, message)
+        _record_import(filename, message, source_kind)
         raise GrowwImportError(f"{filename} contains no importable data rows")
 
-    return commit_import(filename, "GROWW_TRADEBOOK", rows, failures,
+    return commit_import(filename, source_kind, rows, failures,
                          skip_duplicates, account_id)
 
 
@@ -353,10 +357,10 @@ def _existing_trade_keys():
     return keys
 
 
-def _record_import(filename, status):
+def _record_import(filename, status, source_kind="GROWW_TRADEBOOK"):
     """Write the attempt to the imports audit table (never raises)."""
 
     try:
-        manager.add_import(filename, "GROWW_TRADEBOOK", status)
+        manager.add_import(filename, source_kind, status)
     except Exception:  # the audit trail must not mask the real error
         pass

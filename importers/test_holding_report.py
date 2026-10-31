@@ -13,6 +13,7 @@ from database.manager import (
     find_account_by_name,
     get_accounts,
     get_holdings,
+    get_manual_holdings,
     get_prices,
     rebuild_holdings,
 )
@@ -159,6 +160,28 @@ class ImportFlowTests(unittest.TestCase):
 
         with self.assertRaises(ImportFileError):
             import_holding_report(path, account_id=None)
+
+    def test_import_with_us_source_files_rows_separately(self):
+        """The source tags the audit entry and the snapshot rows."""
+
+        broker = find_account_by_name("Main broker")
+        path = write_csv(self.temp / "us.csv", [
+            "Symbol,Quantity,Avg Price",
+            "AAPL,2,15000",
+        ])
+
+        import_holding_report(
+            path, account_id=broker["id"], source="us_holding_report",
+        )
+
+        import_log = db.fetch_all(
+            "SELECT filename, import_type, status FROM imports",
+        )
+        self.assertEqual(import_log[0]["import_type"], "US_HOLDING_REPORT")
+
+        manual = get_manual_holdings(account_id=broker["id"])
+        self.assertEqual(manual[0]["source"], "us_holding_report")
+        self.assertEqual(manual[0]["symbol"], "AAPL")
 
     def test_import_replaces_transaction_derived_position(self):
         """The dashboard avg price follows the latest report, not the notes."""
