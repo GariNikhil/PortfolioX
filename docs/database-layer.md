@@ -53,6 +53,27 @@ bank / holding-report importers):
 A file whose rows were all duplicates still gets one `SUCCESS` audit entry;
 a file that fails to parse gets a `FAILED` entry with no data rows.
 
+`imports.import_type` is an uppercase label naming the parser that produced
+the rows, so the Balance Statement page can say what a file was:
+
+| `import_type` | Parser |
+|---|---|
+| `GROWW_TRADEBOOK` / `US_TRADEBOOK` / `BOND_TRADEBOOK` | `importers/groww.py` |
+| `HOLDING_REPORT` / `US_HOLDING_REPORT` / `BOND_HOLDING_REPORT` | `importers/holding_report.py` |
+| `MF_HOLDING_REPORT` | `importers/mf_holding_report.py` |
+| `CONTRACT_NOTE_PDF` | `importers/pdf_note.py` |
+| `CONTRACT_NOTE_ORDERS` | `importers/contract_note.py` |
+| `IIFL_TRADE_LISTING` | `importers/iifl.py` |
+| `STOCKSLEDGER_PORTFOLIO` | `importers/stocksledger.py` |
+| `AXIS_STATEMENT` | `importers/axis_statement.py` |
+| `PNB_MPASSBOOK` | `importers/pnb_statement.py` |
+| `BANK_STATEMENT` | `importers/bank_statement_tabular.py` (Axis / PNB XLSX & CSV) |
+
+The holding-report audit kinds are decoupled from the storage source they
+write (`importers/holding_report.py::_AUDIT_KINDS`): the audit entry is
+uppercase, while `manual_holdings.source` stays the lowercase snapshot slot
+name (`us_holding_report`, `bond_holding_report`, ...).
+
 This makes every imported row traceable to its source file, which powers
 the **Remove** option on the Balance Statement page:
 
@@ -70,12 +91,21 @@ touched by `delete_import`.
 
 `rebuild_holdings()` recomputes the `holdings` cache from transactions
 (moving weighted-average cost, via `calculations/holdings.py`), merged with
-`manual_holdings`. Two rules keep statement imports authoritative:
+`manual_holdings`. Statement imports stay authoritative, with two different
+strengths of authority:
 
-- Once an account has a `holding_report` snapshot, stock and F&O positions
-  **not listed in it** drop out of the cache (they stay as transactions).
-  `mf_holding_report` governs fund positions the same way.
+- **Per asset class:** once an account has a `holding_report` snapshot,
+  stock and F&O positions **not listed in it** drop out of the cache (they
+  stay as transactions). `mf_holding_report` governs fund positions the
+  same way.
+- **Per symbol only:** `us_holding_report` and `bond_holding_report` replace
+  the transaction-derived row for the symbols they list, but never make
+  other positions look stale — a US-stock statement says nothing about the
+  account's Indian holdings.
 - `manual` rows always survive the rebuild.
+
+Each of the four snapshot sources is an independent slot, so importing a
+fresh statement of one kind never deletes another kind's rows.
 
 Accounts without any snapshot fall back to transaction-derived holdings.
 

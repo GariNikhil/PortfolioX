@@ -5,15 +5,17 @@ PortfolioX is a local-first desktop portfolio management application designed fo
 
 ## Project Structure
 ```
-d:\projects\PortfolioX\
+PortfolioX/
 ├── app.py                  # Entry point
 ├── requirements.txt        # Python dependencies
 ├── phases.md               # Development roadmap (12 phases)
 ├── readme.md               # Project documentation
 ├── database/               # SQLite schema (v9), manager, backups
 ├── calculations/           # Holdings, F&O, allocation, XIRR
-├── importers/              # Groww, contract notes, IIFL, holding
+├── importers/              # Groww, US-stock / bond tradebooks and
+│                           # statements, contract notes, IIFL, holding
 │                           # reports, Axis / PNB bank statements
+│                           # (PDF and XLSX/CSV)
 ├── ui/                     # CustomTkinter pages and hubs
 ├── security/               # Password vault
 ├── tools/                  # CLI utilities (imports, exports, metadata)
@@ -25,7 +27,7 @@ d:\projects\PortfolioX\
 |-------|--------|-------------|
 | 1 | ✅ | Project Scaffold |
 | 2 | ✅ | Database Layer (schema v9, versioned migrations) |
-| 3 | ✅ | Import system (Groww, contract notes, IIFL, holding reports, bank statements) |
+| 3 | ✅ | Import system (equities, funds, US stocks, bonds, bank statements — PDF and XLSX/CSV) |
 | 4 | ✅ | Holdings Calculator (statement-authoritative rebuilds) |
 | 5 | ✅ | CustomTkinter UI (holdings, banking, dividends, prices, reports) |
 | 6-12 | 🟡 | FIFO/tax P&L, charts, packaging, release |
@@ -33,8 +35,15 @@ d:\projects\PortfolioX\
 ## Current Focus
 The app is in daily use as a local portfolio ledger. Recent work: import
 audit tagging (schema v9) with a per-file Remove on the Balance Statement
-page, delete on holdings, and statement-authoritative rebuilds. Next:
-FIFO realized P&L and reports polish.
+page, delete on holdings, statement-authoritative rebuilds, the three-step
+Import flow (file type → "File for" purpose → account), and US-stock / bond
+tradebooks and statements plus XLSX/CSV bank statements. Next: FIFO
+realized P&L and reports polish.
+
+Imported US-stock and bond positions appear in the main Holdings list and
+the dashboard, but the Holdings hub's **US Stocks** and **Bonds** tabs are
+still "Coming Soon" by decision, and the dashboard asset allocation still
+counts them as "Equity" (the asset class is not stored on the holding).
 
 ## Documentation Index
 - **groww-import.md**: Detailed documentation for the Groww import system

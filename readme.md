@@ -6,7 +6,7 @@ PortfolioX is a local desktop portfolio ledger for Indian equity investing (Grow
 
 The application is a working CustomTkinter desktop app with:
 
-- **Imports** — Groww tradebook (CSV/XLSX), contract-note PDFs and Orders sheets, IIFL trade listings, a stocks-ledger portfolio snapshot, stocks and mutual-fund holding reports, and Axis / PNB bank statements. Every import is audited and its rows are tagged to the file that brought them in.
+- **Imports** — Groww tradebook (CSV/XLSX), contract-note PDFs and Orders sheets, IIFL trade listings, a stocks-ledger portfolio snapshot, stocks and mutual-fund holding reports, US-stock and bond tradebooks and holding statements, and Axis / PNB bank statements (PDF, plus XLSX/CSV exports). Every import is audited and its rows are tagged to the file that brought them in.
 - **Holdings** — moving weighted-average cost, F&O and mutual funds separated from equity, statement-authoritative rebuilds (a holding report defines what the account actually holds), manual holdings, and per-symbol delete.
 - **Banking** — per-account transaction lists, balances, and summaries across personal and broker accounts.
 - **Dividends** — dividend entry and reporting.
@@ -14,7 +14,7 @@ The application is a working CustomTkinter desktop app with:
 - **Reports** — Demat report, Balance Statement (account balances plus the full import audit with per-file Remove), Contract Note report, Dividend report.
 - **Settings** — Tax, Pass Vault (OS keyring-backed password storage), and general settings.
 - **Database** — SQLite with versioned, idempotent migrations (schema v9) and automatic backups.
-- A test suite of 305 unit tests covering the database, importers, and calculations.
+- A test suite of 354 unit tests covering the database, importers, and calculations.
 
 FIFO/tax P&L and charts are not complete yet. Financial calculations should be treated as assistive information only and verified independently before being used for tax or investment decisions.
 

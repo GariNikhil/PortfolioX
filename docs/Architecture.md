@@ -16,50 +16,37 @@ PortfolioX is a **local-first** desktop portfolio management application designe
 
 ## Architecture Layers
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                        USER LAYER                             │
-│  Sidebar pages: Dashboard, Accounts, Import, Holdings hub     │
-│  (Stocks / F&O / Mutual Funds), Prices, Transactions,         │
-│  Banking, Dividends, Learn, Settings hub                      │
-│  (Reports / Tax / Pass Vault / General)                       │
-└──────────────────────────────┬───────────────────────────────┘
-                               ▼
-┌──────────────────────────────────────────────────────────────┐
-│                  CALCULATION LAYER                             │
-│                                                               │
-│  calculations/holdings.py  -  Moving weighted-average cost    │
-│  calculations/fno.py       -  F&O symbol normalization        │
-│  calculations/allocation.py - Fund / F&O labelling            │
-│  calculations/xirr.py      -  Return statistics               │
-│                                                               │
-└──────────────────────────────┬───────────────────────────────┘
-                               ▼
-┌──────────────────────────────────────────────────────────────┐
-│                    DATA LAYER                                  │
-│                                                               │
-│  database/schema.py    -  Versioned schema + migrations (v9)  │
-│  database/db.py        -  SQLite connection & transactions    │
-│  database/manager.py   -  CRUD operations & helpers           │
-│                                                               │
-└──────────────────────────────┬───────────────────────────────┘
-                               ▼
-┌──────────────────────────────────────────────────────────────┐
-│                    INPUT LAYER                                 │
-│                                                               │
-│  importers/groww.py          -  Groww tradebook CSV/XLSX      │
-│  importers/pdf_note.py       -  Contract-note PDFs            │
-│  importers/contract_note.py  -  Orders sheets                 │
-│  importers/iifl.py           -  IIFL trade listings           │
-│  importers/stocksledger.py   -  Portfolio snapshot workbooks  │
-│  importers/holding_report.py -  Stocks holding reports        │
-│  importers/mf_holding_report.py - MF holding reports          │
-│  importers/axis_statement.py -  Axis bank statements          │
-│  importers/pnb_statement.py  -  PNB mPassbook statements      │
-│  importers/common.py         -  Shared audit-first flow       │
-│                                                               │
-└──────────────────────────────────────────────────────────────┘
-```
+Top to bottom: the UI calls calculations, calculations read the data layer,
+and the data layer is fed by the importers.
+
+| Layer | Modules |
+|---|---|
+| **User** | Sidebar pages: Dashboard, Accounts, Import, Holdings hub (Stocks / F&O / Mutual Funds), Prices, Transactions, Banking, Dividends, Learn, Settings hub (Reports / Tax / Pass Vault / General) |
+| **Calculations** | `calculations/holdings.py` (moving weighted-average cost), `calculations/fno.py` (F&O symbol normalization), `calculations/allocation.py` (fund / F&O labelling), `calculations/xirr.py` (return statistics) |
+| **Data** | `database/schema.py` (versioned schema + migrations, v9), `database/db.py` (SQLite connection & transactions), `database/manager.py` (CRUD operations & helpers) |
+| **Input** | `importers/` — see below |
+
+### Importers
+
+Most importers are one file per source file *format*; US-stock and bond files
+reuse the equity parsers instead of duplicating them, because they are the
+same table shape with a different label.
+
+| Module | Handles |
+|---|---|
+| `groww.py` | Groww tradebooks (XLSX/CSV) — also US-stock and bond tradebooks via `source_kind` (`US_TRADEBOOK` / `BOND_TRADEBOOK`) |
+| `holding_report.py` | Stocks holding statements — also US-stock and bond statements via `source` (`us_holding_report` / `bond_holding_report`) |
+| `mf_holding_report.py` | Mutual-fund holding statements |
+| `contract_note.py` | Contract-note Orders sheets |
+| `pdf_note.py` | Contract-note PDFs (including password-protected) |
+| `iifl.py` | IIFL trade listings (legacy `.xls`) |
+| `stocksledger.py` | stocksledger portfolio snapshot workbooks |
+| `axis_statement.py` | Axis bank statements (PDF) |
+| `pnb_statement.py` | PNB mPassbook statements (PDF) |
+| `bank_statement_tabular.py` | Axis / PNB bank statements as XLSX or CSV |
+| `bank_common.py` | Shared bank-import flow (account resolution, detail auto-fill, duplicate skipping) |
+| `common.py` | Shared audit-first flow, number/date parsing, duplicate keys |
+| `support.py` | Test-support helpers |
 
 ## Key flows
 
@@ -68,8 +55,11 @@ PortfolioX is a **local-first** desktop portfolio management application designe
   status. Duplicates are skipped by a canonical content key, overselling
   rows become row-level failures, and holdings are rebuilt afterwards.
 - **Holdings rebuild**: transaction-derived positions merge with manual /
-  statement snapshot rows; a holding report makes its account's listed
-  positions authoritative (see `docs/database-layer.md`).
+  statement snapshot rows. A stocks statement (`holding_report`) makes its
+  account's stock and F&O positions authoritative, a fund statement
+  (`mf_holding_report`) does the same for funds, and US-stock / bond
+  statements (`us_holding_report` / `bond_holding_report`) replace only the
+  symbols they list. See `docs/database-layer.md`.
 - **Remove an import**: the Balance Statement page counts the rows tagged
   to an import, confirms, deletes exactly those rows plus the audit entry,
   and rebuilds holdings.
