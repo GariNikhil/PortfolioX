@@ -37,8 +37,9 @@ The app is in daily use as a local portfolio ledger. Recent work: import
 audit tagging (schema v9) with a per-file Remove on the Balance Statement
 page, delete on holdings, statement-authoritative rebuilds, the three-step
 Import flow (file type → "File for" purpose → account), and US-stock / bond
-tradebooks and statements plus XLSX/CSV bank statements. Next: FIFO
-realized P&L and reports polish.
+tradebooks and statements plus XLSX/CSV bank statements, and FIFO realized
+P&L as a pure calculation (`calculations/fifo.py`). Next: a realized-P&L
+screen and reports polish.
 
 Imported US-stock and bond positions appear in the main Holdings list and
 the dashboard, but the Holdings hub's **US Stocks** and **Bonds** tabs are

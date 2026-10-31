@@ -22,7 +22,7 @@ and the data layer is fed by the importers.
 | Layer | Modules |
 |---|---|
 | **User** | Sidebar pages: Dashboard, Accounts, Import, Holdings hub (Stocks / F&O / Mutual Funds), Prices, Transactions, Banking, Dividends, Learn, Settings hub (Reports / Tax / Pass Vault / General) |
-| **Calculations** | `calculations/holdings.py` (moving weighted-average cost), `calculations/fno.py` (F&O symbol normalization), `calculations/allocation.py` (fund / F&O labelling), `calculations/xirr.py` (return statistics) |
+| **Calculations** | `calculations/holdings.py` (moving weighted-average cost), `calculations/fifo.py` (FIFO realized P&L), `calculations/fno.py` (F&O symbol normalization), `calculations/allocation.py` (fund / F&O labelling), `calculations/xirr.py` (return statistics) |
 | **Data** | `database/schema.py` (versioned schema + migrations, v9), `database/db.py` (SQLite connection & transactions), `database/manager.py` (CRUD operations & helpers) |
 | **Input** | `importers/` — see below |
 
