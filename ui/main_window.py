@@ -2,6 +2,11 @@ import customtkinter as ctk
 
 from ui.accounts_page import AccountsPage
 from ui.banking_page import BankingPage
+from ui.calculator_panel import (
+    PANEL_WIDTH as CALCULATOR_WIDTH,
+    CalculatorIconButton,
+    CalculatorPanel,
+)
 from ui.dashboard import DashboardPage
 from ui.dividends_page import DividendsPage
 from ui.holdings_hub import HoldingsHubPage
@@ -49,6 +54,53 @@ class PortfolioX(ctk.CTk):
         )
 
         self.content.grid(row=0, column=1, sticky="nsew")
+
+        # Slim utility bar: the calculator toggle sits at the right edge,
+        # above whichever page is open.
+        utility = ctk.CTkFrame(self.content, fg_color="transparent", height=34)
+        utility.pack(fill="x", padx=PADDING, pady=(8, 0))
+        utility.pack_propagate(False)
+
+        self.calculator_button = CalculatorIconButton(
+            utility, command=self.toggle_calculator
+        )
+        self.calculator_button.pack(side="right")
+
+        # The open page and the calculator share the body: the page is
+        # column 0 and the calculator is a fixed-width column 1 that only
+        # appears when toggled.
+        self.body = ctk.CTkFrame(
+            self.content,
+            corner_radius=0,
+            fg_color=BACKGROUND
+        )
+        self.body.pack(fill="both", expand=True)
+        self.body.grid_rowconfigure(0, weight=1)
+        self.body.grid_columnconfigure(0, weight=1)
+
+        self.page_host = ctk.CTkFrame(
+            self.body,
+            corner_radius=0,
+            fg_color=BACKGROUND
+        )
+        self.page_host.grid(row=0, column=0, sticky="nsew")
+
+        self.calculator_slot = ctk.CTkFrame(
+            self.body,
+            width=CALCULATOR_WIDTH,
+            corner_radius=0,
+            fg_color=CARD,
+        )
+        self.calculator_slot.grid_propagate(False)
+        # Children are packed, so the fixed width must be held by pack
+        # propagation (grid propagation only affects grid-managed children).
+        self.calculator_slot.pack_propagate(False)
+        self.calculator = CalculatorPanel(
+            self.calculator_slot, on_close=self.toggle_calculator
+        )
+        self.calculator.pack(fill="both", expand=True)
+
+        self.calculator_open = False
 
         # ---------------- Title ---------------- #
 
@@ -113,7 +165,7 @@ class PortfolioX(ctk.CTk):
         factory = self.pages.get(page, DashboardPage)
         if self.current_page is not None:
             self.current_page.destroy()
-        self.current_page = factory(self.content)
+        self.current_page = factory(self.page_host)
 
         # Highlight the active navigation button.
         for name, btn in self.buttons.items():
@@ -122,3 +174,16 @@ class PortfolioX(ctk.CTk):
                 text_color=SIDEBAR if name == page else TEXT,
                 hover_color=BORDER if name != page else ACCENT,
             )
+
+    # ---------------- Calculator ---------------- #
+
+    def toggle_calculator(self):
+        """Show or hide the calculator beside the open page."""
+
+        if self.calculator_open:
+            self.calculator_slot.grid_remove()
+        else:
+            self.calculator_slot.grid(row=0, column=1, sticky="ns")
+
+        self.calculator_open = not self.calculator_open
+        self.calculator_button.set_active(self.calculator_open)

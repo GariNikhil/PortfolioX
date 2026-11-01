@@ -12,10 +12,11 @@ The application is a working CustomTkinter desktop app with:
 - **Banking** — per-account transaction lists, balances, and summaries across personal and broker accounts.
 - **Dividends** — dividend entry and reporting.
 - **Prices** — a local price table seeded from holding reports, editable in the app.
+- **Calculator** — a dockable panel opened from the calculator icon at the top right: a basic expression pad plus a profit / loss form showing invested amount, proceeds, return percent, and breakeven price.
 - **Reports** — Demat report, Balance Statement (account balances plus the full import audit with per-file Remove), Contract Note report, Dividend report.
 - **Settings** — Tax, Pass Vault (OS keyring-backed password storage), and general settings.
 - **Database** — SQLite with versioned, idempotent migrations (schema v9) and automatic backups.
-- A test suite of 370 unit tests covering the database, importers, and calculations.
+- A test suite of 386 unit tests covering the database, importers, and calculations.
 
 FIFO realized P&L is available as a calculation only: tax classification (short/long-term, grandfathering), a realized-P&L screen, and charts are not built yet. Financial calculations should be treated as assistive information only and verified independently before being used for tax or investment decisions.
 
@@ -49,7 +50,7 @@ Set-Location "<path-to-PortfolioX>"
 & ".\.venv\Scripts\python.exe" app.py
 ```
 
-The application opens on the Dashboard. Use the sidebar to switch pages: Dashboard, Accounts, Import, Holdings, Prices, Transactions, Banking, Dividends, Learn, and Settings (which hosts the Reports, Tax, Pass Vault, and General hubs).
+The application opens on the Dashboard. Use the sidebar to switch pages: Dashboard, Accounts, Import, Holdings, Prices, Transactions, Banking, Dividends, Learn, and Settings (which hosts the Reports, Tax, Pass Vault, and General hubs). The calculator icon at the top right docks a calculator beside the open page.
 
 ## Validate the source
 
