@@ -38,9 +38,15 @@ audit tagging (schema v9) with a per-file Remove on the Balance Statement
 page, delete on holdings, statement-authoritative rebuilds, the three-step
 Import flow (file type → "File for" purpose → account), and US-stock / bond
 tradebooks and statements plus XLSX/CSV bank statements, FIFO realized
-P&L as a pure calculation (`calculations/fifo.py`), and a docked calculator
+P&L as a pure calculation (`calculations/fifo.py`), a docked calculator
 (expression pad plus a profit / loss form) opened from the icon above the
-page. Next: a realized-P&L screen and reports polish.
+page, and a rebuilt Learn hub (lessons, a searchable book library, a
+strategy playbook, and a planning path, all offline from
+`ui/learn_content.py`). Next: a realized-P&L screen and reports polish.
+
+The Learn content is original distilled notes from the 15 books in
+`referance/books` (plus one infographic noted but not summarised); the
+source files stay local and gitignored, and nothing is downloaded.
 
 Imported US-stock and bond positions appear in the main Holdings list and
 the dashboard, but the Holdings hub's **US Stocks** and **Bonds** tabs are

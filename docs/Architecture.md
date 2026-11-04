@@ -21,7 +21,7 @@ and the data layer is fed by the importers.
 
 | Layer | Modules |
 |---|---|
-| **User** | Sidebar pages: Dashboard, Accounts, Import, Holdings hub (Stocks / F&O / Mutual Funds), Prices, Transactions, Banking, Dividends, Learn, Settings hub (Reports / Tax / Pass Vault / General), plus a dockable calculator panel (`ui/calculator_panel.py`) beside the open page |
+| **User** | Sidebar pages: Dashboard, Accounts, Import, Holdings hub (Stocks / F&O / Mutual Funds), Prices, Transactions, Banking, Dividends, Learn hub (Lessons / Book Library / Strategy Playbook / Planning, content in `ui/learn_content.py`), Settings hub (Reports / Tax / Pass Vault / General), plus a dockable calculator panel (`ui/calculator_panel.py`) beside the open page |
 | **Calculations** | `calculations/holdings.py` (moving weighted-average cost), `calculations/fifo.py` (FIFO realized P&L), `calculations/calculator.py` (safe expression evaluation and profit / loss), `calculations/fno.py` (F&O symbol normalization), `calculations/allocation.py` (fund / F&O labelling), `calculations/xirr.py` (return statistics) |
 | **Data** | `database/schema.py` (versioned schema + migrations, v9), `database/db.py` (SQLite connection & transactions), `database/manager.py` (CRUD operations & helpers) |
 | **Input** | `importers/` — see below |
@@ -63,6 +63,12 @@ same table shape with a different label.
 - **Remove an import**: the Balance Statement page counts the rows tagged
   to an import, confirms, deletes exactly those rows plus the audit entry,
   and rebuilds holdings.
+- **Learn content**: `ui/learn_content.py` holds frozen dataclasses
+  (`Track`, `Book`, `PlaybookEntry`, `PlanningPhase`) and the curated
+  constants the Learn tabs render. It imports no Tk or database modules,
+  so it is unit-tested headless (`ui/test_learn_content.py`). The notes
+  are original summaries of the books in `referance/books`; the source
+  files stay local and nothing is fetched from the network.
 
 ## Documentation
 
