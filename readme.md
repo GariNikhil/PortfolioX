@@ -11,13 +11,13 @@ The application is a working CustomTkinter desktop app with:
 - **Realized P&L** — FIFO matching: each sale consumes the oldest buy lots, with buy charges rolled into lot cost and sell charges deducted from proceeds, returning per-sale match detail (`calculations/fifo.py`). It is a pure calculation — short/long-term tax classification and any screen or database integration are not built.
 - **Banking** — per-account transaction lists, balances, and summaries across personal and broker accounts.
 - **Dividends** — dividend entry and reporting.
-- **Learn** — an offline hub with four tabs: beginner lessons, a searchable book library with notes distilled from every book in `referance/books`, a strategy playbook, and a six-phase planning path. Nothing is fetched from the internet.
+- **Learn** — an offline hub with four tabs: beginner lessons, a searchable book library, a strategy playbook, and a six-phase planning path. Every book in `referance/books` has distilled notes, and selecting a book opens it for reading inside the app (PDF or its Markdown conversion), in a resizable window with page navigation, find, and adjustable text size. Nothing is fetched from the internet.
 - **Prices** — a local price table seeded from holding reports, editable in the app.
 - **Calculator** — a dockable panel opened from the calculator icon at the top right: a basic expression pad plus a profit / loss form showing invested amount, proceeds, return percent, and breakeven price.
 - **Reports** — Demat report, Balance Statement (account balances plus the full import audit with per-file Remove), Contract Note report, Dividend report.
 - **Settings** — Tax, Pass Vault (OS keyring-backed password storage), and general settings.
 - **Database** — SQLite with versioned, idempotent migrations (schema v9) and automatic backups.
-- A test suite of 409 unit tests covering the database, importers, calculations, and the offline Learn content.
+- A test suite of 439 unit tests covering the database, importers, calculations, the offline Learn content, and the book-text reader.
 
 FIFO realized P&L is available as a calculation only: tax classification (short/long-term, grandfathering), a realized-P&L screen, and charts are not built yet. Financial calculations should be treated as assistive information only and verified independently before being used for tax or investment decisions.
 
@@ -64,7 +64,7 @@ Run the test suite. It uses temporary databases and does not modify your portfol
 Compile-check without starting the GUI:
 
 ```powershell
-& ".\.venv\Scripts\python.exe" -m compileall -q app.py ui database importers calculations
+& ".\.venv\Scripts\python.exe" -m compileall -q app.py ui books database importers calculations
 ```
 
 ## Folder structure
@@ -83,7 +83,11 @@ PortfolioX/
 │   ├── balance_statement_page.py  # Funds + full import audit with Remove
 │   ├── learn_page.py         # Lessons / Book Library / Playbook / Planning
 │   ├── learn_content.py      # Offline notes distilled from the books
+│   ├── book_reader.py        # In-app book reader window
 │   └── ...                   # One file per page, plus theme.py
+├── books/                    # Book-text extraction, cleaning, and cache
+│   ├── library.py            # PDF / Markdown → readable pages
+│   └── test_library.py       # Headless tests for the reading rules
 ├── database/                 # SQLite schema (v9), manager, backups
 ├── importers/                # Groww, contract notes, IIFL, holding
 │   │                         # reports, Axis / PNB bank statements
@@ -99,6 +103,8 @@ PortfolioX/
 ## Data and privacy
 
 PortfolioX stores data locally. The SQLite database is created at `data/portfoliox.db` under the project directory, regardless of the current working directory used to launch the app. Do not commit real tradebooks, contract notes, statements, exported reports, or other sensitive financial files to source control; `data/` and `referance/` are gitignored.
+
+Reading a book in Learn parses the file locally on first open and caches the extracted text in `data/book_text/` so later opens are instant. Deleting that folder only means the book is parsed again. Book files are never copied into the repository or bundled with the app, and the reader never downloads anything.
 
 Database backups are written to `data/backups/` before schema migrations and can also be created from the app.
 

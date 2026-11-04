@@ -10,6 +10,7 @@ import tkinter as tk
 
 import customtkinter as ctk
 
+from ui.book_reader import open_reader
 from ui.learn_content import (
     BOOKS,
     EXTRA_REFERENCES,
@@ -153,8 +154,8 @@ class LessonsTab(ctk.CTkFrame):
             f"{len(LESSONS)} short lessons on how the Indian market works, "
             f"plus a library of {len(BOOKS)} books, {len(PLAYBOOK)} "
             f"strategy rules and {len(PLANNING_PHASES)} planning phases. "
-            "Read a lesson, then open the Book Library for the notes behind "
-            "it. Everything is offline and stored on this computer.",
+            "Read a lesson, then open the Book Library to read a book "
+            "itself or its notes. Everything is offline and on this computer.",
         )
 
         for heading, text in LESSONS:
@@ -176,7 +177,7 @@ class LessonsTab(ctk.CTkFrame):
 
 
 class BookCard(ctk.CTkFrame):
-    """One book: title, thesis, and notes that expand on request."""
+    """One book: title, thesis, notes, and a way into the reader."""
 
     def __init__(self, parent, book):
         super().__init__(parent, fg_color=CARD, corner_radius=8)
@@ -208,21 +209,45 @@ class BookCard(ctk.CTkFrame):
         _wrap_to_container(title, header, side_pad=60)
 
         track = TRACK_BY_KEY[book.track]
-        ctk.CTkLabel(
+        meta = ctk.CTkLabel(
             self,
             text=f"{book.author} · {book.year} · {track.title}",
             font=SMALL_FONT,
             text_color=TEXT_SECONDARY,
             anchor="w",
-        ).pack(fill="x", padx=16, pady=(2, 6))
+        )
+        meta.pack(fill="x", padx=16, pady=(2, 6))
+
+        # Reading the book is the main action, so the card itself and its
+        # title both open the reader — the buttons below stay available
+        # for the notes and for anyone who prefers an explicit control.
+        for widget in (self, header, title, meta):
+            widget.bind("<Button-1>", self.open_book)
+            widget.configure(cursor="hand2")
 
         _prose(self, book.thesis, color=TEXT, pady=(0, 0))
 
+        actions = ctk.CTkFrame(self, fg_color="transparent")
+        actions.pack(fill="x", padx=16, pady=(10, 12))
+
+        self.read_button = ctk.CTkButton(
+            actions,
+            text="Read book  ▸",
+            width=130,
+            height=32,
+            font=SMALL_FONT,
+            fg_color=ACCENT,
+            hover_color=SUCCESS,
+            text_color=SIDEBAR,
+            command=self.open_book,
+        )
+        self.read_button.pack(side="left")
+
         self.toggle = ctk.CTkButton(
-            self,
+            actions,
             text="Notes ▾",
             width=110,
-            height=30,
+            height=32,
             font=SMALL_FONT,
             fg_color="transparent",
             hover_color=BORDER,
@@ -231,7 +256,7 @@ class BookCard(ctk.CTkFrame):
             text_color=TEXT,
             command=self.toggle_notes,
         )
-        self.toggle.pack(anchor="w", padx=16, pady=(8, 12))
+        self.toggle.pack(side="left", padx=8)
 
         self.details = ctk.CTkFrame(self, fg_color=SIDEBAR, corner_radius=6)
         _bullets(self.details, "Key ideas", book.ideas)
@@ -240,10 +265,13 @@ class BookCard(ctk.CTkFrame):
 
         _prose(
             self.details,
-            f"Source file: referance/books/{book.file_name}",
+            f"Reads referance/books/{book.file_name} inside the app.",
             font=SMALL_FONT,
             pady=(10, 12),
         )
+
+    def open_book(self, _event=None):
+        open_reader(self.winfo_toplevel(), self.book)
 
     def toggle_notes(self):
         if self.expanded:
@@ -295,6 +323,15 @@ class BookLibraryTab(ctk.CTkFrame):
             text_color=TEXT_SECONDARY,
         )
         self.count_label.pack(side="right")
+
+        ctk.CTkLabel(
+            self,
+            text="Select a book to read it here: the reader opens the file "
+                 "from the shelf without leaving the app.",
+            font=SMALL_FONT,
+            text_color=TEXT_SECONDARY,
+            anchor="w",
+        ).pack(fill="x", padx=PADDING + 2, pady=(0, 6))
 
         self.body = ctk.CTkScrollableFrame(self, fg_color=BACKGROUND)
         self.body.pack(fill="both", expand=True, padx=PADDING, pady=(0, PADDING))

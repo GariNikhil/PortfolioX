@@ -10,7 +10,7 @@ PortfolioX is a **local-first** desktop portfolio management application designe
 - **GUI Framework**: CustomTkinter
 - **Database**: SQLite (local file-based database, `data/portfoliox.db`, schema v9)
 - **Spreadsheets**: openpyxl (XLSX), xlrd (legacy IIFL .xls)
-- **PDF parsing**: pypdf (including password-protected contract notes)
+- **PDF parsing**: pypdf (contract notes, plus book text in the Learn reader)
 - **Vault**: keyring + cryptography (OS credential store, AES-GCM)
 - **Packaging**: PyInstaller (planned for standalone executables)
 
@@ -21,10 +21,10 @@ and the data layer is fed by the importers.
 
 | Layer | Modules |
 |---|---|
-| **User** | Sidebar pages: Dashboard, Accounts, Import, Holdings hub (Stocks / F&O / Mutual Funds), Prices, Transactions, Banking, Dividends, Learn hub (Lessons / Book Library / Strategy Playbook / Planning, content in `ui/learn_content.py`), Settings hub (Reports / Tax / Pass Vault / General), plus a dockable calculator panel (`ui/calculator_panel.py`) beside the open page |
+| **User** | Sidebar pages: Dashboard, Accounts, Import, Holdings hub (Stocks / F&O / Mutual Funds), Prices, Transactions, Banking, Dividends, Learn hub (Lessons / Book Library / Strategy Playbook / Planning, content in `ui/learn_content.py`, book reader in `ui/book_reader.py`), Settings hub (Reports / Tax / Pass Vault / General), plus a dockable calculator panel (`ui/calculator_panel.py`) beside the open page |
 | **Calculations** | `calculations/holdings.py` (moving weighted-average cost), `calculations/fifo.py` (FIFO realized P&L), `calculations/calculator.py` (safe expression evaluation and profit / loss), `calculations/fno.py` (F&O symbol normalization), `calculations/allocation.py` (fund / F&O labelling), `calculations/xirr.py` (return statistics) |
 | **Data** | `database/schema.py` (versioned schema + migrations, v9), `database/db.py` (SQLite connection & transactions), `database/manager.py` (CRUD operations & helpers) |
-| **Input** | `importers/` — see below |
+| **Input** | `importers/` — see below. Separate from portfolio data, `books/` reads local book files for the Learn reader |
 
 ### Importers
 
@@ -69,6 +69,18 @@ same table shape with a different label.
   so it is unit-tested headless (`ui/test_learn_content.py`). The notes
   are original summaries of the books in `referance/books`; the source
   files stay local and nothing is fetched from the network.
+- **Reading a book**: clicking a book card (or its "Read book" button)
+  calls `open_reader`, which opens one non-modal `BookReader` per book and
+  lifts an existing window instead of stacking a second copy. The window
+  asks `books/library.py` for a `Source` (the Markdown conversion when one
+  sits beside the PDF, else the PDF), serves cached pages from
+  `data/book_text/` when the file is unchanged, and otherwise extracts on
+  a background thread in 10-page batches, inserting pages as they arrive
+  so a 600-page PDF stays responsive. Cleaning drops running heads, page
+  numbers, ligatures and soft hyphens, then reflows hard-wrapped lines
+  into paragraphs. The module imports no Tk code, so the rules are tested
+  headless in `books/test_library.py`; a missing file is explained in the
+  window, never downloaded.
 
 ## Documentation
 

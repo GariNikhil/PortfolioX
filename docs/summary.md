@@ -42,11 +42,17 @@ P&L as a pure calculation (`calculations/fifo.py`), a docked calculator
 (expression pad plus a profit / loss form) opened from the icon above the
 page, and a rebuilt Learn hub (lessons, a searchable book library, a
 strategy playbook, and a planning path, all offline from
-`ui/learn_content.py`). Next: a realized-P&L screen and reports polish.
+`ui/learn_content.py`). Selecting a book now opens it for reading inside
+the app, with page navigation, find, and adjustable text size
+(`ui/book_reader.py` + `books/library.py`). Next: a realized-P&L screen
+and reports polish.
 
 The Learn content is original distilled notes from the 15 books in
 `referance/books` (plus one infographic noted but not summarised); the
-source files stay local and gitignored, and nothing is downloaded.
+source files stay local and gitignored, and nothing is downloaded. The
+reader parses those same local files on demand and caches the extracted
+text under `data/book_text/`; it never copies a book into the repository
+or opens the OS PDF viewer.
 
 Imported US-stock and bond positions appear in the main Holdings list and
 the dashboard, but the Holdings hub's **US Stocks** and **Bonds** tabs are
