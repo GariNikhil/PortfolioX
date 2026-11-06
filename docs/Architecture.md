@@ -12,7 +12,21 @@ PortfolioX is a **local-first** desktop portfolio management application designe
 - **Spreadsheets**: openpyxl (XLSX), xlrd (legacy IIFL .xls)
 - **PDF parsing**: pypdf (contract notes, plus book text in the Learn reader)
 - **Vault**: keyring + cryptography (OS credential store, AES-GCM)
-- **Packaging**: PyInstaller (planned for standalone executables)
+- **Packaging**: PyInstaller, driven by `portfoliox.spec` (a folder build; see "Build a Windows app" in `readme.md`)
+
+## Runtime locations
+
+`paths.py` resolves the writable folders for both ways of running the app:
+
+| Location | Source checkout | Built app |
+|---|---|---|
+| Database | `<repo>/data/portfoliox.db` | `<exe folder>/data/portfoliox.db` |
+| Password vault | `<repo>/data/vault.json` | `<exe folder>/data/vault.json` |
+| Book cache | `<repo>/data/book_text/` | `<exe folder>/data/book_text/` |
+| Personal books | `<repo>/referance/books/` | `<exe folder>/referance/books/` |
+
+Modules ask `paths.app_root()` instead of computing a folder from `__file__`. Inside a PyInstaller build a module's own path points into a temporary folder that is deleted on exit, so writing there would silently reset the portfolio on every launch. `PORTFOLIOX_HOME` redirects all four, which is how a build can be tried without touching real data.
+
 
 ## Architecture Layers
 

@@ -1,0 +1,3 @@
+# Batch files are read by cmd.exe; keep their CRLF line endings regardless
+# of the cloning platform or core.autocrlf setting.
+*.bat text eol=crlf

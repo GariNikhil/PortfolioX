@@ -1,7 +1,9 @@
 # PortfolioX - Database Layer
 
 The database is SQLite at `data/portfoliox.db`, created and migrated by
-`database/schema.py` and accessed through `database/manager.py`. The schema
+`database/schema.py` and accessed through `database/manager.py`. The folder comes
+from `paths.data_dir()`: beside `app.py` in a source checkout, beside
+`PortfolioX.exe` in a built app. The schema
 is versioned: `PRAGMA user_version` stores the current version, and
 `ensure_schema()` applies idempotent migrations in order on every startup,
 so the same code works on a fresh database and on an existing one.

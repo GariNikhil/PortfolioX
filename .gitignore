@@ -10,6 +10,10 @@ data/
 backups/
 exports/
 
+# Generated build output (PyInstaller): see portfoliox.spec
+build/
+dist/
+
 # Personal reference material: broker statements, contract notes, ledgers
 # (readme policy: never commit real tradebooks, contract notes, or financial files)
 referance/

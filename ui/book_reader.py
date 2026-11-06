@@ -422,7 +422,7 @@ class BookReader(ctk.CTkToplevel):
         message = (
             f"{self.book.title}\n{self.book.author}\n\n"
             "The reader looks for this file in the shelf folder:\n\n"
-            f"    referance{chr(92)}books{chr(92)}{self.book.file_name}\n\n"
+            f"    {library.BOOKS_FOLDER / self.book.file_name}\n\n"
             "That folder is personal material: it is not part of the source "
             "code and the app never downloads books. To read it here, copy "
             "the file into the folder above and open the book again.\n\n"

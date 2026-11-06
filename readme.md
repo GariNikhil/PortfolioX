@@ -53,6 +53,21 @@ Set-Location "<path-to-PortfolioX>"
 
 The application opens on the Dashboard. Use the sidebar to switch pages: Dashboard, Accounts, Import, Holdings, Prices, Transactions, Banking, Dividends, Learn, and Settings (which hosts the Reports, Tax, Pass Vault, and General hubs). The calculator icon at the top right docks a calculator beside the open page.
 
+On Windows you can also double-click `start.bat`. It runs the app with this folder's `.venv`, so the project can be moved or renamed without editing the file.
+
+## Build a Windows app
+
+`portfoliox.spec` builds a standalone folder that runs without Python installed:
+
+```powershell
+& ".\.venv\Scripts\python.exe" -m pip install -r requirements-build.txt
+& ".\.venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean portfoliox.spec
+```
+
+The result is `dist\PortfolioX\PortfolioX.exe`; copy the whole `dist\PortfolioX` folder, not the executable alone.
+
+Only `assets` is bundled. `data`, `backups`, `exports` and `referance` are left out on purpose: they hold the live database, generated reports, and personal broker statements and books. A built app creates them next to `PortfolioX.exe`, so `paths.py` resolves those folders from the running app rather than from a module's own path — a bundled module lives in a temporary folder that is deleted on exit. Set `PORTFOLIOX_HOME` to run a build against a different folder, for example to try it without touching your real portfolio.
+
 ## Validate the source
 
 Run the test suite. It uses temporary databases and does not modify your portfolio data:
@@ -72,6 +87,10 @@ Compile-check without starting the GUI:
 ```text
 PortfolioX/
 ├── app.py                    # Application entry point
+├── paths.py                  # Runtime folders (source and built app)
+├── start.bat                 # Windows launcher using this folder's .venv
+├── portfoliox.spec           # PyInstaller build recipe
+├── requirements-build.txt    # Runtime + PyInstaller, for building only
 ├── phases.md                 # Development roadmap
 ├── readme.md                 # Project documentation
 ├── docs/                     # Feature and design documentation
@@ -102,7 +121,7 @@ PortfolioX/
 
 ## Data and privacy
 
-PortfolioX stores data locally. The SQLite database is created at `data/portfoliox.db` under the project directory, regardless of the current working directory used to launch the app. Do not commit real tradebooks, contract notes, statements, exported reports, or other sensitive financial files to source control; `data/` and `referance/` are gitignored.
+PortfolioX stores data locally. The SQLite database is created at `data/portfoliox.db` next to `app.py` (or next to `PortfolioX.exe` in a built app), regardless of the current working directory used to launch it. Do not commit real tradebooks, contract notes, statements, exported reports, or other sensitive financial files to source control; `data/` and `referance/` are gitignored.
 
 Reading a book in Learn parses the file locally on first open and caches the extracted text in `data/book_text/` so later opens are instant. Deleting that folder only means the book is parsed again. Book files are never copied into the repository or bundled with the app, and the reader never downloads anything.
 

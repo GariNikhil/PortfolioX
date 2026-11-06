@@ -1,10 +1,13 @@
 import sqlite3
 from contextlib import contextmanager
-from pathlib import Path
 
-# Database location
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DB_FOLDER = PROJECT_ROOT / "data"
+from paths import app_root, data_dir
+
+# Database location. Resolved from the running app rather than from this
+# file, so a frozen build keeps its database next to the executable
+# instead of inside a temporary bundle folder.
+PROJECT_ROOT = app_root()
+DB_FOLDER = data_dir()
 DB_FILE = "portfoliox.db"
 DB_PATH = DB_FOLDER / DB_FILE
 

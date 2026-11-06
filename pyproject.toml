@@ -1,0 +1,50 @@
+# Project metadata, used by tooling and by a source install.
+#
+# The supported deployment is the PyInstaller build described in
+# portfoliox.spec and in "Build a Windows app" in readme.md. Installing
+# with pip also works, but a pip-installed copy keeps its database,
+# password vault and book cache inside site-packages; prefer the build or
+# a source checkout.
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "portfoliox"
+version = "0.1.0"
+description = "Local desktop portfolio ledger for Indian equity investing"
+readme = "readme.md"
+requires-python = ">=3.13"
+license = {text = "MIT"}
+authors = [
+    {name = "PortfolioX Contributors"},
+]
+dependencies = [
+    "customtkinter==6.0.0",
+    "openpyxl==3.1.5",
+    "xlrd==2.0.2",
+    "pypdf==6.21.3",
+    "keyring==25.7.0",
+    "cryptography==50.0.0",
+    "yfinance==1.7.0",
+]
+
+# A console-free launcher named PortfolioX, matching the bundled build.
+[project.gui-scripts]
+PortfolioX = "app:main"
+
+[tool.setuptools]
+py-modules = ["app", "paths"]
+
+[tool.setuptools.packages.find]
+include = [
+    "ui*",
+    "books*",
+    "calculations*",
+    "database*",
+    "importers*",
+    "market_data*",
+    "security*",
+    "tools*",
+]

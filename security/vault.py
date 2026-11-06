@@ -37,8 +37,11 @@ import keyring
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-VAULT_PATH = PROJECT_ROOT / "data" / "vault.json"
+from paths import data_dir
+
+# The encrypted vault lives beside the database, next to the executable
+# in a frozen build (see paths.app_root).
+VAULT_PATH = data_dir() / "vault.json"
 
 KEYRING_SERVICE = "PortfolioX"
 KEYRING_ACCOUNT = "vault-key"

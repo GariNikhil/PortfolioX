@@ -18,9 +18,12 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-BOOKS_FOLDER = PROJECT_ROOT / "referance" / "books"
-CACHE_FOLDER = PROJECT_ROOT / "data" / "book_text"
+from paths import books_dir, data_dir
+
+# The shelf is personal material beside the app, and the extract cache
+# sits beside the database, so both survive a frozen build (see paths).
+BOOKS_FOLDER = books_dir()
+CACHE_FOLDER = data_dir() / "book_text"
 
 # Pages are stored back to back in one cache file, separated by a form
 # feed: it does not occur in extracted prose and survives a round trip.
