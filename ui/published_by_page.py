@@ -1,9 +1,9 @@
-"""About me page: read-only profile details, shown inside the Settings hub.
+"""Published by page: read-only publisher details, shown inside Settings.
 
-The values live in ``ui.about_content`` rather than in the database, so
-the page has nothing to save and nothing to validate. Each field is
-skipped when it was left blank, which is why a name alone still produces
-a complete-looking card.
+The values live in ``ui.published_by_content`` rather than in the
+database, so the page has nothing to save and nothing to validate. Each
+field is skipped when it was left blank, which is why a name alone still
+produces a complete-looking card.
 
 Profile links open in the default browser, and only when clicked; the
 page never fetches anything by itself.
@@ -13,7 +13,7 @@ import webbrowser
 
 import customtkinter as ctk
 
-from ui.about_content import profile_rows
+from ui.published_by_content import profile_rows
 from ui.theme import *
 
 # Width at which a long bio wraps. The content area is about 900 px at the
@@ -21,7 +21,7 @@ from ui.theme import *
 BIO_WRAP = 700
 
 
-class AboutPage(ctk.CTkFrame):
+class PublishedByPage(ctk.CTkFrame):
 
     def __init__(self, parent):
         super().__init__(parent, fg_color=BACKGROUND)
@@ -29,14 +29,14 @@ class AboutPage(ctk.CTkFrame):
 
         ctk.CTkLabel(
             self,
-            text="👤 About me",
+            text="👤 Published by",
             font=TITLE_FONT,
             text_color=TEXT,
         ).pack(pady=(40, 4))
 
         ctk.CTkLabel(
             self,
-            text="Profile details shown in Settings. Stored in the code, "
+            text="Who publishes PortfolioX. The details live in the code, "
                  "not in the database.",
             font=SMALL_FONT,
             text_color=TEXT_SECONDARY,

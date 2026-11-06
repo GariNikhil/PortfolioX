@@ -15,7 +15,7 @@ The application is a working CustomTkinter desktop app with:
 - **Prices** — a local price table seeded from holding reports, editable in the app.
 - **Calculator** — a dockable panel opened from the calculator icon at the top right: a basic expression pad plus a profit / loss form showing invested amount, proceeds, return percent, and breakeven price.
 - **Reports** — Demat report, Balance Statement (account balances plus the full import audit with per-file Remove), Contract Note report, Dividend report.
-- **Settings** — Tax, Pass Vault (OS keyring-backed password storage), general settings, and a read-only About me page whose details live in `ui/about_content.py`.
+- **Settings** — Tax, Pass Vault (OS keyring-backed password storage), general settings, and a read-only Published by page whose details live in `ui/published_by_content.py`.
 - **Database** — SQLite with versioned, idempotent migrations (schema v9) and automatic backups.
 - A test suite of 475 unit tests covering the database, importers, calculations, the offline Learn content, and the book-text reader.
 
@@ -51,7 +51,7 @@ Set-Location "<path-to-PortfolioX>"
 & ".\.venv\Scripts\python.exe" app.py
 ```
 
-The application opens on the Dashboard. Use the sidebar to switch pages: Dashboard, Accounts, Import, Holdings, Prices, Transactions, Banking, Dividends, Learn, and Settings (which hosts the Reports, Tax, Pass Vault, General, and About hubs). The calculator icon at the top right docks a calculator beside the open page.
+The application opens on the Dashboard. Use the sidebar to switch pages: Dashboard, Accounts, Import, Holdings, Prices, Transactions, Banking, Dividends, Learn, and Settings (which hosts the Reports, Tax, Pass Vault, General, and Published by tabs). The calculator icon at the top right docks a calculator beside the open page.
 
 On Windows you can also double-click `start.bat`. It runs the app with this folder's `.venv`, so the project can be moved or renamed without editing the file.
 
@@ -98,9 +98,9 @@ PortfolioX/
 │   ├── main_window.py        # Main window and sidebar navigation
 │   ├── holdings_hub.py       # Stocks / F&O / Mutual Funds hub
 │   ├── reports_hub.py        # Demat / Balance Statement / ... hub
-│   ├── settings_hub.py       # Reports / Tax / Pass Vault / General / About hub
-│   ├── about_content.py      # About me profile details (edit these values)
-│   ├── about_page.py         # Read-only About me page
+│   ├── settings_hub.py       # Reports / Tax / Pass Vault / General / Published by
+│   ├── published_by_content.py  # Published by details (edit these values)
+│   ├── published_by_page.py  # Read-only Published by page
 │   ├── balance_statement_page.py  # Funds + full import audit with Remove
 │   ├── learn_page.py         # Lessons / Book Library / Playbook / Planning
 │   ├── learn_content.py      # Offline notes distilled from the books

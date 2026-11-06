@@ -1,14 +1,15 @@
-"""Settings hub: tab bar over Reports, Tax, Pass Vault, General and About.
+"""Settings hub: tab bar over Reports, Tax, Pass Vault, General and Published by.
 
 One sidebar entry ("Settings") consolidates the auxiliary pages. The
 Reports tab embeds the reports hub (with its own sub-tab bar); General
 holds the original settings content (vault health, database location);
-About me is the read-only profile page. Always opens on Reports.
+Published by is the read-only publisher details page. Always opens on
+Reports.
 """
 
 import customtkinter as ctk
 
-from ui.about_page import AboutPage
+from ui.published_by_page import PublishedByPage
 from ui.reports_hub import ReportsHubPage
 from ui.settings_page import SettingsPage
 from ui.tax_page import TaxPage
@@ -20,7 +21,7 @@ TABS = (
     ("Tax", lambda parent: TaxPage(parent)),
     ("Pass Vault", lambda parent: VaultPage(parent)),
     ("General", lambda parent: SettingsPage(parent)),
-    ("About", lambda parent: AboutPage(parent)),
+    ("Published by", lambda parent: PublishedByPage(parent)),
 )
 
 

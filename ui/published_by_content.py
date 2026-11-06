@@ -1,4 +1,4 @@
-"""Profile details for the Settings > About me page.
+"""Publisher details for the Settings > Published by page.
 
 The page is read-only: everything it shows comes from this file, so
 changing a detail is a code edit. Fields left empty are skipped, which
@@ -12,7 +12,7 @@ on its own.
 # ------------------------ Your details ------------------------ #
 # Fill a value in and the page picks it up; leave it empty to hide it.
 
-NAME = "Demo Investor"
+NAME = "Mudappagari Nikhil"
 
 BIO = ""
 
