@@ -55,6 +55,16 @@ The application opens on the Dashboard. Use the sidebar to switch pages: Dashboa
 
 On Windows you can also double-click `start.bat`. It runs the app with this folder's `.venv`, so the project can be moved or renamed without editing the file.
 
+## First run
+
+A new install starts empty. The database is created on first launch, and the only rows in it are two placeholder accounts — `Main broker` and `Main personal`.
+
+1. Open **Accounts** and rename those two, or add the accounts you actually hold.
+2. Open **Import** and pick your own files: tradebooks, contract notes, holding reports, or bank statements. Every import is audited, so one file can be removed again from the Balance Statement report.
+3. Optionally open **Pass Vault** to store the password for encrypted contract notes.
+
+Files are read locally and nothing is uploaded. `data/`, `referance/` and `exports/` are gitignored, so a clone never carries anyone else's portfolio.
+
 ## Build a Windows app
 
 `portfoliox.spec` builds a standalone folder that runs without Python installed:
