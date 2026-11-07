@@ -1,0 +1,17 @@
+id: unique-id
+account_id: account-id
+security_id: security-id-or-null
+trade_date: YYYY-MM-DD
+type: BUY | SELL | DEPOSIT | WITHDRAWAL | DIVIDEND | FEE | TAX | CORPORATE_ACTION | OTHER
+quantity: decimal-or-null
+avg price: decimal-or-null
+buy/sell price: decimal-or-null
+current price: decimal-or-null
+currency: INR
+brokerage: decimal
+taxes: decimal
+other_charges: decimal
+external_reference: string-or-null
+source: MANUAL | IMPORT | ADJUSTMENT
+created_at: timestamp
+notes: string
