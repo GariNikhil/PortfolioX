@@ -17,7 +17,7 @@ The application is a working CustomTkinter desktop app with:
 - **Reports** — Demat report, Balance Statement (account balances plus the full import audit with per-file Remove), Contract Note report, Dividend report.
 - **Settings** — Tax, Pass Vault (OS keyring-backed password storage), general settings, and a read-only Published by page whose details live in `ui/published_by_content.py`.
 - **Database** — SQLite with versioned, idempotent migrations (schema v9) and automatic backups.
-- A test suite of 475 unit tests covering the database, importers, calculations, the offline Learn content, and the book-text reader.
+- A test suite of 487 unit tests covering the database, importers, calculations, the offline Learn content, and the book-text reader.
 
 FIFO realized P&L is available as a calculation only: tax classification (short/long-term, grandfathering), a realized-P&L screen, and charts are not built yet. Financial calculations should be treated as assistive information only and verified independently before being used for tax or investment decisions.
 

@@ -864,7 +864,7 @@ class AccountDetailsTests(unittest.TestCase):
 
     def test_update_account_details_values_are_trimmed(self):
         account_id = self._account_row("Main personal")["id"]
-        update_account_details(account_id, holder_name="  Nikhil  ")
+        update_account_details(account_id, holder_name="  Demo  ")
         self.assertEqual(self._account_row("Main personal")["holder_name"], "Demo")
 
     def test_update_account_details_unknown_account(self):

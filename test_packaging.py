@@ -109,6 +109,10 @@ class SpecTest(unittest.TestCase):
 
     def test_assets_are_bundled(self):
         self.assertIn(("assets", "assets"), self.analysis["datas"])
+        # Git does not store empty directories, so the folder must carry a
+        # tracked file or a fresh clone cannot run the build recipe.
+        self.assertTrue((ROOT / "assets").is_dir())
+        self.assertTrue(any((ROOT / "assets").iterdir()))
 
     def test_build_is_a_folder_without_a_console_window(self):
         self.assertTrue(self.exe["exclude_binaries"])

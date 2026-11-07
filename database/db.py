@@ -18,11 +18,28 @@ def create_connection():
 
     Rows are returned as sqlite3.Row objects so consumers can access
     columns by name (for example, row["symbol"] instead of row[2]).
+
+    Three pragmas are set on every connection:
+
+    * ``foreign_keys`` — enforce the ``REFERENCES`` links declared in
+      ``schema.py``. SQLite leaves this off by default for backwards
+      compatibility; the delete paths already remove child rows first.
+    * ``busy_timeout`` — wait up to five seconds for a lock instead of
+      failing at once when a report or CLI tool reads while the UI writes.
+    * ``synchronous=FULL`` — a committed row reaches the disk before the
+      call returns, which matters for a ledger.
+
+    The default rollback journal is kept deliberately (no WAL):
+    ``database/backup.py`` snapshots the file with a plain copy before
+    imports, and such a copy is only consistent without a ``-wal`` file.
     """
 
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(DB_PATH)
     connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute("PRAGMA busy_timeout = 5000")
+    connection.execute("PRAGMA synchronous = FULL")
     return connection
 
 
@@ -61,13 +78,9 @@ def fetch_all(query, params=()):
     """
 
     connection = create_connection()
-
-    cursor = connection.cursor()
-
-    cursor.execute(query, params)
-
-    result = cursor.fetchall()
-
-    connection.close()
-
-    return result
+    try:
+        cursor = connection.cursor()
+        cursor.execute(query, params)
+        return cursor.fetchall()
+    finally:
+        connection.close()

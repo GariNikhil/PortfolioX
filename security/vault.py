@@ -29,6 +29,7 @@ import base64
 import json
 import os
 import secrets
+import tempfile
 from datetime import datetime
 from fnmatch import fnmatch
 from pathlib import Path
@@ -210,13 +211,36 @@ def _load():
 
 
 def _save(vault):
+    """Write the vault atomically so a crash cannot truncate it.
+
+    A partly written vault would lose every stored password (the key in
+    the OS keystore survives, but the encrypted entries do not). The new
+    JSON is written to a temporary file in the same folder, flushed to
+    disk, then swapped in with ``os.replace``, which is atomic on Windows
+    and POSIX. A failure before the swap leaves the old file untouched.
+    """
+
+    payload = json.dumps(vault, indent=2)
+    temp_path = None
     try:
         VAULT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        VAULT_PATH.write_text(
-            json.dumps(vault, indent=2), encoding="utf-8"
+        descriptor, temp_name = tempfile.mkstemp(
+            prefix=VAULT_PATH.name + ".", suffix=".tmp", dir=VAULT_PATH.parent
         )
+        temp_path = Path(temp_name)
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, VAULT_PATH)
     except OSError as error:
         raise VaultError(f"could not write vault file {VAULT_PATH}: {error}") from error
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
 
 
 def _decrypt(entry):

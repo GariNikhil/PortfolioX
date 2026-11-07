@@ -1506,58 +1506,5 @@ def get_stock_metadata():
     )
 
 
-# ------------------------------------------------------- stock metadata #
-
-
-def set_stock_metadata(symbol, sector=None, market_cap=None, source="yahoo"):
-    """Upsert one symbol's cached metadata (sector, market cap in rupees).
-
-    market_cap is a rupee figure stored as INTEGER rupees (or None for
-    funds / ETFs / derivatives, which have no market capitalization).
-    Returns the stored row.
-    """
-
-    symbol = str(symbol or "").strip().upper()
-    if not symbol:
-        raise ValueError("stock metadata needs a symbol")
-
-    cap = None if market_cap is None else int(round(float(market_cap)))
-    with transaction() as connection:
-        connection.execute(
-            """
-            INSERT INTO stock_metadata (symbol, sector, market_cap, source)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(symbol) DO UPDATE SET
-                sector = excluded.sector,
-                market_cap = excluded.market_cap,
-                source = excluded.source,
-                updated_at = CURRENT_TIMESTAMP
-            """,
-            (symbol, sector, cap, source),
-        )
-    return find_stock_metadata(symbol)
-
-
-def find_stock_metadata(symbol):
-    """One symbol's metadata row, or None."""
-
-    symbol = str(symbol or "").strip().upper()
-    rows = fetch_all(
-        "SELECT symbol, sector, market_cap, source, updated_at "
-        "FROM stock_metadata WHERE symbol = ?",
-        (symbol,),
-    )
-    return rows[0] if rows else None
-
-
-def get_stock_metadata():
-    """All cached stock metadata rows, symbols ascending."""
-
-    return fetch_all(
-        "SELECT symbol, sector, market_cap, source, updated_at "
-        "FROM stock_metadata ORDER BY symbol"
-    )
-
-
 if __name__ == "__main__":
     print(get_portfolio_summary())

@@ -116,5 +116,57 @@ class FrozenBuildTest(unittest.TestCase):
         self.assertEqual(paths.data_dir(), self.other / "data")
 
 
+class InstalledPackageTest(unittest.TestCase):
+    """A pip-installed copy keeps writable data outside site-packages.
+
+    site-packages is read-only for non-admin installs and is wiped on
+    upgrade, so resolving the database there would either fail on first
+    run or delete the user's portfolio during a package upgrade.
+    """
+
+    def setUp(self):
+        temp = Path(tempfile.gettempdir()).resolve()
+        self.site_file = (
+            temp / "venv" / "Lib" / "site-packages" / "paths.py"
+        )
+        self.local = temp / "LocalAppData"
+
+        for patcher in (
+            mock.patch.object(paths, "__file__", str(self.site_file)),
+            mock.patch.dict(
+                os.environ,
+                {paths.HOME_ENV: "", "LOCALAPPDATA": str(self.local)},
+            ),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_app_root_leaves_site_packages(self):
+        root = paths.app_root()
+
+        self.assertNotIn("site-packages", str(root))
+        self.assertEqual(root, self.local / paths.APP_NAME)
+
+    def test_writable_folders_are_per_user(self):
+        root = self.local / paths.APP_NAME
+
+        self.assertEqual(paths.data_dir(), root / "data")
+        self.assertEqual(paths.books_dir(), root / "referance" / "books")
+
+    def test_home_override_beats_the_install_folder(self):
+        elsewhere = self.local / "scratch"
+        os.environ[paths.HOME_ENV] = str(elsewhere)
+
+        self.assertEqual(paths.app_root(), elsewhere)
+
+    def test_without_localappdata_falls_back_to_home(self):
+        home = self.local / "home"
+        os.environ.pop("LOCALAPPDATA", None)
+        with mock.patch.object(Path, "home", return_value=home):
+            self.assertEqual(
+                paths.app_root(), home / ".local" / "share" / paths.APP_NAME
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

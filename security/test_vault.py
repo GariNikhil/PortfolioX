@@ -127,6 +127,27 @@ class FailureModeTests(VaultTestCase):
         self.assertEqual(get_password("A"), "pw1")
         self.assertEqual(get_password("B"), "pw2")
 
+    def test_failed_write_keeps_the_previous_vault(self):
+        # The swap is the last step; a failure before it must leave the old
+        # file (and the passwords in it) untouched rather than truncated.
+        store_password("CONTRACT_NOTE_PDF", "old-pw")
+        before = self.vault_path.read_bytes()
+
+        with patch.object(vault.os, "replace", side_effect=OSError("disk full")):
+            with self.assertRaisesRegex(VaultError, "could not write"):
+                store_password("CONTRACT_NOTE_PDF", "new-pw")
+
+        self.assertEqual(self.vault_path.read_bytes(), before)
+        self.assertEqual(get_password("CONTRACT_NOTE_PDF"), "old-pw")
+
+    def test_save_leaves_no_temporary_file_behind(self):
+        store_password("A", "pw1")
+
+        self.assertEqual(
+            [path.name for path in self.vault_path.parent.iterdir()],
+            ["vault.json"],
+        )
+
 
 class DeleteAndStatusTests(VaultTestCase):
     def test_delete_removes_kind_entries(self):

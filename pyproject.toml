@@ -1,10 +1,10 @@
 # Project metadata, used by tooling and by a source install.
 #
 # The supported deployment is the PyInstaller build described in
-# portfoliox.spec and in "Build a Windows app" in readme.md. Installing
-# with pip also works, but a pip-installed copy keeps its database,
-# password vault and book cache inside site-packages; prefer the build or
-# a source checkout.
+# portfoliox.spec and in "Build a Windows app" in readme.md. A pip install
+# also works: when the package runs from site-packages, paths.py keeps its
+# writable folders under %LOCALAPPDATA%\PortfolioX instead of writing into
+# the (often read-only) install directory.
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
@@ -45,6 +45,7 @@ include = [
     "database*",
     "importers*",
     "market_data*",
+    "reports*",
     "security*",
     "tools*",
 ]

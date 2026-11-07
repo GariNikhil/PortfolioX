@@ -23,5 +23,9 @@ referance notes/
 .clinerules/skills/
 .opencode/skills/
 
+# Local editor/agent settings may hold credentials. The tracked template is
+# .opencode/settings.example.json.
+.opencode/settings.json
+
 # Editor state
 .vscode/
