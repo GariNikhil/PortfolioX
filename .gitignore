@@ -57,6 +57,7 @@ installer/Output/
 htmlcov/
 
 # --- IDE state ---
+.vscode/
 .idea/
 *.sublime-project
 *.sublime-workspace
