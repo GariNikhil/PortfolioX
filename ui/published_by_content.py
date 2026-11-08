@@ -16,7 +16,7 @@ NAME = "Mudappagari Nikhil"
 
 BIO = ""
 
-EMAIL = "<email>"
+EMAIL = "garinikhil5@gmail.com"
 
 LINKS = (
     ("GitHub", "https://github.com/GariNikhil"),

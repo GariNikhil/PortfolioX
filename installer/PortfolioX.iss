@@ -1,37 +1,31 @@
 ; -- PortfolioX Setup Script --
-; Demonstrates copying application files and creating icons.
-
-; SEE THE DOCUMENTATION FOR DETAILS ON CREATING .ISS SCRIPT FILES!
-
 [Setup]
 AppName=PortfolioX
 AppVersion=1.0.0
 WizardStyle=modern dynamic
-DefaultDirName={commonpf}\PortfolioX
+DefaultDirName={localappdata}\PortfolioX
 DefaultGroupName=PortfolioX
-UninstallDisplayIcon={app}\app.exe
+UninstallDisplayIcon={app}\PortfolioX.exe
+PrivilegesRequired=lowest
 Compression=lzma2
 SolidCompression=yes
-OutputDir=userdocs:PortfolioX Output
+OutputDir=..\installer_output
 
 [Tasks]
 name: "desktopicon"; description: "Create Desktop Icon"
 name: "startmenu"; description: "Create Start Menu Folder"
 
 [Files]
-; Source files - copy application files
-Source: "<repo>\app.py"; DestDir: "{app}"; Flags: ignoreversion
-Source: "<repo>\requirements.txt"; DestDir: "{app}"; Flags: ignoreversion
-Source: "<repo>\start.bat"; DestDir: "{app}"; Flags: ignoreversion
-Source: "<repo>\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
-Source: "<repo>\referance\icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+; Source: the built application folder. Run PyInstaller (portfoliox.spec)
+; before building the installer so dist\PortfolioX\ exists.
+Source: "..\dist\PortfolioX\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 ; Create Start Menu icon
-Name: "{group}\PortfolioX"; Filename: "{app}\app.py"; IconFileName: "{app}\icon.ico"
+Name: "{group}\PortfolioX"; Filename: "{app}\PortfolioX.exe"
 ; Create Desktop icon
-Name: "{commondesktop}\PortfolioX"; Filename: "{app}\start.bat"; IconFileName: "{app}\icon.ico"
+Name: "{commondesktop}\PortfolioX"; Filename: "{app}\PortfolioX.exe"
 
 [Run]
 ; Run application after installation
-Filename: "{app}\start.bat"; Description: "Launch PortfolioX"; Flags: nowait
+Filename: "{app}\PortfolioX.exe"; Description: "Launch PortfolioX"; Flags: nowait

@@ -1,6 +1,8 @@
 # Byte-compiled files / caches
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
 
 # Virtual environment
 .venv/
@@ -19,13 +21,46 @@ dist/
 referance/
 referance notes/
 
-# Vendored third-party skill collections (not project source)
-.clinerules/skills/
-.opencode/skills/
+# --- Privacy hardening: AI/agent directories (never track) ---
+# These hold local credentials, prompts, workflow notes, and vendored
+# third-party skill bundles. None of it is project source.
+.clinerules/
+.opencode/
+.cline/
+.claude/
+.codex/
+.gemini/
+.cursor/
 
-# Local editor/agent settings may hold credentials. The tracked template is
-# .opencode/settings.example.json.
-.opencode/settings.json
+# --- Build logs and stray scripts ---
+build_log.txt
+build_output.txt
+/bypass
 
-# Editor state
-.vscode/
+# --- Installer output (Inno Setup) ---
+installer/Output/
+
+# --- Environment files (keep .env.example as a tracked template) ---
+.env
+.env.*
+!.env.example
+
+# --- Logs ---
+*.log
+
+# --- Git bundles (backups, never commit) ---
+*.bundle
+
+# --- Python test/caches ---
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- IDE state ---
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# --- OS files ---
+.DS_Store
+Thumbs.db
