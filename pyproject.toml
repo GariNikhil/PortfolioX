@@ -18,7 +18,7 @@ readme = "readme.md"
 requires-python = ">=3.13"
 license = {text = "MIT"}
 authors = [
-    {name = "PortfolioX Contributors"},
+    {name = "Gari Nikhil (@GariNikhil / GariNikhilGari)"},
 ]
 dependencies = [
     "customtkinter==6.0.0",
